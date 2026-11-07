@@ -3,7 +3,6 @@ uvicorn
 python-multipart
 pillow
 numpy
+requests
 httpx
 python-dotenv
-requests
-huggingface-hub

@@ -40,17 +40,59 @@ export interface Message {
     timestamp: Date;
 }
 
-export interface InterviewData {
+export interface FacialAttributes {
+    gender?: 'Male' | 'Female' | 'Non-Binary' | string;
+    age?: string;
+    faceShape?: string;
+    skinTone?: string;
+    hairStyle?: string;
+    hairColor?: string;
+    hairTexture?: string;
+    eyebrows?: string;
+    eyeShape?: string;
+    eyeColor?: string;
+    eyeSize?: string;
+    eyes?: string;
+    noseShape?: string;
+    nose?: string;
+    lipShape?: string;
+    lips?: string;
+    jawline?: string;
+    build?: string;
+    facialHair?: string;
+    distinctiveFeatures?: string[];
+    rawDescription?: string;
+}
+
+export interface PromptValidationResult {
+    isValid: boolean;
+    attributes: FacialAttributes;
+    interpretedPrompt: string;
+    warnings: string[];
+    missingCritical: string[];
+    confidence: number;
+}
+
+export interface InterviewData extends FacialAttributes {
     age?: string;
     gender?: string;
     faceShape?: string;
+    skinTone?: string;
     build?: string;
     hairStyle?: string;
     hairColor?: string;
     hairTexture?: string;
+    eyebrows?: string;
     eyeColor?: string;
     eyeShape?: string;
     eyeSize?: string;
+    eyes?: string;
     noseShape?: string;
+    nose?: string;
+    lipShape?: string;
+    lips?: string;
+    jawline?: string;
+    facialHair?: string;
     distinctiveFeatures?: string[];
+    rawDescription?: string;
 }

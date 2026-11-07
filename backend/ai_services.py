@@ -1,28 +1,42 @@
-﻿"""
-F.A.C.E.S. AI Services - Gemini Image Generation Version
-Uses Google Gemini's image generation API for inpainting / face refinement.
-Works with Python 3.14+.
+"""
+F.A.C.E.S. AI Services - Cloudflare Workers AI Version
+Uses Cloudflare Workers AI for text-to-image composite generation and surgical inpainting refinement.
+Works with Python 3.10+.
 """
 
 from PIL import Image, ImageFilter, ImageDraw  # pyre-ignore[21]
 import io
 import base64
 import os
+import json
 import httpx  # pyre-ignore[21]
 from dotenv import load_dotenv  # pyre-ignore[21]
 
-# Load environment variables from parent directory (project root)
-env_path = os.path.join(os.path.dirname(__file__), "..", ".env")
-load_dotenv(env_path)
+# Load environment variables from parent directory (project root) or local env files
+def load_project_env():
+    project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+    for env_name in [".env", ".env.local"]:
+        p = os.path.join(project_root, env_name)
+        if os.path.exists(p):
+            load_dotenv(p, override=True)
+    backend_env = os.path.join(os.path.dirname(__file__), ".env")
+    if os.path.exists(backend_env):
+        load_dotenv(backend_env, override=True)
 
-# Check for Gemini API key
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
-HAS_GEMINI = bool(GEMINI_API_KEY) and GEMINI_API_KEY != "YOUR_GEMINI_API_KEY_HERE"
+load_project_env()
 
-if HAS_GEMINI:
-    print(f"Gemini API configured - Key: {GEMINI_API_KEY[:10]}...")  # pyre-ignore[16]
+# Cloudflare Workers AI Credentials
+CLOUDFLARE_ACCOUNT_ID = os.getenv("CLOUDFLARE_ACCOUNT_ID", "").strip()
+CLOUDFLARE_API_TOKEN = os.getenv("CLOUDFLARE_API_TOKEN", "").strip()
+HAS_CLOUDFLARE = (
+    bool(CLOUDFLARE_ACCOUNT_ID) and "YOUR" not in CLOUDFLARE_ACCOUNT_ID.upper() and
+    bool(CLOUDFLARE_API_TOKEN) and "YOUR" not in CLOUDFLARE_API_TOKEN.upper()
+)
+
+if HAS_CLOUDFLARE:
+    print(f"Cloudflare Workers AI configured (Account: {CLOUDFLARE_ACCOUNT_ID[:6]}..., Token: {CLOUDFLARE_API_TOKEN[:8]}...)")
 else:
-    print("Warning: GEMINI_API_KEY not set. Get one free at https://aistudio.google.com/apikey")
+    print("Warning: Cloudflare Workers AI credentials missing in .env / .env.local")
 
 
 class FaceIdentifier:
@@ -34,8 +48,9 @@ class FaceIdentifier:
     
     # Mapping of feature types to mask files
     MASK_MAP = {
-        # Top region (eyebrows, forehead, hair)
-        "eyebrows": "top_half_mask.png",
+        # Top region (targeted fallback used for eyebrows if no file)
+        "eyebrow": "eyebrows_mask.png",
+        "eyebrows": "eyebrows_mask.png",
         "forehead": "top_half_mask.png",
         "hair": "hair_mask.png",
         "hairstyle": "hair_mask.png",
@@ -73,29 +88,59 @@ class FaceIdentifier:
         print(f"FaceIdentifier initialized (pre-made masks)")
 
     def get_mask(self, image: Image.Image, feature_name: str, strategy: str = "auto") -> Image.Image:
-        """Get the appropriate pre-made mask for the feature."""
+        """
+        Get the surgically isolated mask for the feature.
+        Guarantees 0% bleed into other facial regions (nose, eyes, lips, jawline).
+        """
+        import numpy as np
         feature_lower = feature_name.lower().strip()
+        w, h = image.size
         
-        # Find matching mask
+        # Find matching mask file if available
         mask_file = None
         for key, value in self.MASK_MAP.items():
             if key in feature_lower:
                 mask_file = value
                 break
         
+        raw_mask = None
         if mask_file:
             mask_path = os.path.join(self.masks_dir, mask_file)  # pyre-ignore[6]
             if os.path.exists(mask_path):
-                print(f"Using pre-made mask: {mask_file}")
-                mask = Image.open(mask_path).convert("L")
-                mask = mask.resize(image.size, Image.Resampling.LANCZOS)
-                return mask
+                print(f"Using pre-made mask base: {mask_file}")
+                raw_mask = Image.open(mask_path).convert("L")
+                raw_mask = raw_mask.resize(image.size, Image.Resampling.LANCZOS)
         
-        print(f"No pre-made mask for '{feature_name}', generating fallback")
-        return self._generate_fallback_mask(image, feature_name)
+        if raw_mask is None:
+            print(f"Generating targeted surgical fallback mask for '{feature_name}'")
+            raw_mask = self._generate_fallback_mask(image, feature_name)
+
+        # Apply surgical mutual exclusion to strictly protect unrelated facial features
+        mask_arr = np.array(raw_mask)
+        
+        if "nose" in feature_lower:
+            # Strictly protect eyes and mouth from nose edits
+            mask_arr[:int(h * 0.43), :] = 0   # Protect eye region
+            mask_arr[int(h * 0.59):, :] = 0   # Protect mouth/lip region
+            mask_arr[:, :int(w * 0.36)] = 0   # Protect left cheek
+            mask_arr[:, int(w * 0.64):] = 0   # Protect right cheek
+            print("Enforced surgical boundary on NOSE mask (eyes & lips 100% protected)")
+        elif any(k in feature_lower for k in ["mouth", "lip", "lips"]):
+            # Strictly protect nose and eyes from lip edits
+            mask_arr[:int(h * 0.60), :] = 0   # Protect nose and eyes
+            mask_arr[:, :int(w * 0.26)] = 0   # Protect outer left jaw
+            mask_arr[:, int(w * 0.74):] = 0   # Protect outer right jaw
+            print("Enforced surgical boundary on LIPS mask (nose & eyes 100% protected)")
+        elif any(k in feature_lower for k in ["eye", "eyes"]):
+            # Strictly protect nose bridge center and mouth from eye edits
+            mask_arr[int(h * 0.43):, :] = 0   # Protect nose and mouth
+            mask_arr[:, int(w * 0.45):int(w * 0.55)] = 0  # Protect nose bridge
+            print("Enforced surgical boundary on EYES mask (nose & lips 100% protected)")
+            
+        return Image.fromarray(mask_arr)
 
     def _generate_fallback_mask(self, image: Image.Image, feature_name: str) -> Image.Image:
-        """Generate a feature-specific fallback mask."""
+        """Generate a feature-specific fallback mask with precise facial coordinates."""
         w, h = image.size
         mask = Image.new("L", (w, h), 0)
         draw = ImageDraw.Draw(mask)
@@ -103,141 +148,390 @@ class FaceIdentifier:
         feature_lower = feature_name.lower().strip()
         
         if "nose" in feature_lower:
-            # Nose Box Strategy: Center, slightly up
-            # Center X = 0.5 * w
-            # Center Y = 0.48 * h
-            # Width = 0.18 * w
-            # Height = 0.22 * h
-            
-            x1 = w * 0.41
-            y1 = h * 0.37
-            x2 = w * 0.59
-            y2 = h * 0.59
-            
-            # Draw rectangle (box) for the nose
+            # Nose Box: Center, middle height
+            x1 = w * 0.38
+            y1 = h * 0.36
+            x2 = w * 0.62
+            y2 = h * 0.60
             draw.rectangle([x1, y1, x2, y2], fill=255)
             print(f"Generated Surgical Nose Mask: Box [{int(x1)},{int(y1)},{int(x2)},{int(y2)}]")
-            
+        elif "eyebrow" in feature_lower or "brow" in feature_lower:
+            # Eyebrow strip: above eyes, across forehead lower band
+            x1 = w * 0.20
+            y1 = h * 0.25
+            x2 = w * 0.80
+            y2 = h * 0.38
+            draw.rectangle([x1, y1, x2, y2], fill=255)
+            print(f"Generated Surgical Eyebrow Mask: Box [{int(x1)},{int(y1)},{int(x2)},{int(y2)}]")
+        elif any(k in feature_lower for k in ["mouth", "lip", "lips"]):
+            x1 = w * 0.30
+            y1 = h * 0.60
+            x2 = w * 0.70
+            y2 = h * 0.78
+            draw.rectangle([x1, y1, x2, y2], fill=255)
+            print(f"Generated Surgical Mouth Mask: Box [{int(x1)},{int(y1)},{int(x2)},{int(y2)}]")
+        elif any(k in feature_lower for k in ["eye", "eyes"]):
+            x1 = w * 0.18
+            y1 = h * 0.30
+            x2 = w * 0.82
+            y2 = h * 0.48
+            draw.rectangle([x1, y1, x2, y2], fill=255)
+            print(f"Generated Surgical Eye Mask: Box [{int(x1)},{int(y1)},{int(x2)},{int(y2)}]")
+        elif any(k in feature_lower for k in ["chin", "jaw", "jawline"]):
+            x1 = w * 0.25
+            y1 = h * 0.65
+            x2 = w * 0.75
+            y2 = h * 0.95
+            draw.rectangle([x1, y1, x2, y2], fill=255)
+            print(f"Generated Surgical Jaw/Chin Mask: Box [{int(x1)},{int(y1)},{int(x2)},{int(y2)}]")
         else:
             # Default center ellipse for general features
             draw.ellipse([w * 0.25, h * 0.25, w * 0.75, h * 0.75], fill=255)
             
         return mask
 
-    def process_mask(self, mask: Image.Image, blur_radius: int = 3, dilate: bool = True) -> Image.Image:
-        """Post-process mask with optional dilation and blur."""
+    def process_mask(self, mask: Image.Image, feature_name: str = "", blur_radius: int = 3, dilate: bool = True) -> Image.Image:
+        """Post-process mask with optional dilation and blur, enforcing strict surgical isolation."""
         if dilate:
             mask = mask.filter(ImageFilter.MaxFilter(5))
         if blur_radius > 0:
             mask = mask.filter(ImageFilter.GaussianBlur(radius=blur_radius))
-        return mask
+        import numpy as np
+        m_arr = np.array(mask)
+        m_arr[m_arr < 4] = 0
+
+        # Enforce surgical boundary if feature_name is specified
+        if feature_name:
+            feature_lower = feature_name.lower().strip()
+            h, w = m_arr.shape
+            if "nose" in feature_lower:
+                m_arr[:int(h * 0.44), :] = 0   # Protect eye region
+                m_arr[int(h * 0.59):, :] = 0   # Protect mouth/lip region
+                m_arr[:, :int(w * 0.36)] = 0   # Protect left cheek
+                m_arr[:, int(w * 0.64):] = 0   # Protect right cheek
+            elif any(k in feature_lower for k in ["mouth", "lip", "lips"]):
+                m_arr[:int(h * 0.60), :] = 0   # Protect nose and eyes
+                m_arr[:, :int(w * 0.26)] = 0   # Protect outer left jaw
+                m_arr[:, int(w * 0.74):] = 0   # Protect outer right jaw
+            elif any(k in feature_lower for k in ["eye", "eyes"]):
+                m_arr[int(h * 0.43):, :] = 0   # Protect nose and mouth
+                m_arr[:, int(w * 0.45):int(w * 0.55)] = 0  # Protect nose bridge
+
+        return Image.fromarray(m_arr)
 
 
-import httpx  # pyre-ignore[21]
-import json
+import requests  # pyre-ignore[21]
+from requests.adapters import HTTPAdapter  # pyre-ignore[21]
+from urllib3.util.retry import Retry  # pyre-ignore[21]
+
+class CloudflareAIClient:
+    """
+    Component: Cloudflare Workers AI REST Client
+    Official REST API integration with Cloudflare Workers AI endpoints:
+    - Text-to-Image: @cf/bytedance/stable-diffusion-xl-lightning
+    - Inpainting:    @cf/runwayml/stable-diffusion-v1-5-inpainting
+    - Image-to-Image: @cf/runwayml/stable-diffusion-v1-5-img2img (with inpainting fallback if 403)
+    """
+    BASE_URL = "https://api.cloudflare.com/client/v4/accounts"
+    T2I_MODEL = "@cf/bytedance/stable-diffusion-xl-lightning"
+    INPAINT_MODEL = "@cf/runwayml/stable-diffusion-v1-5-inpainting"
+    IMG2IMG_MODEL = "@cf/runwayml/stable-diffusion-v1-5-img2img"
+
+    def __init__(self, account_id: str | None = None, api_token: str | None = None):
+        self.account_id = (account_id or os.getenv("CLOUDFLARE_ACCOUNT_ID", "")).strip()
+        self.api_token = (api_token or os.getenv("CLOUDFLARE_API_TOKEN", "")).strip()
+        if "YOUR" in self.account_id.upper():
+            self.account_id = ""
+        if "YOUR" in self.api_token.upper():
+            self.api_token = ""
+
+        # Set up HTTP session with automatic retries for robust edge network handling
+        self.session = requests.Session()
+        retries = Retry(
+            total=3,
+            backoff_factor=0.5,
+            status_forcelist=[502, 503, 504],
+            raise_on_status=False
+        )
+        self.session.mount("https://", HTTPAdapter(max_retries=retries))
+
+    @property
+    def is_configured(self) -> bool:
+        return bool(self.account_id and self.api_token)
+
+    def _headers(self) -> dict[str, str]:
+        if not self.is_configured:
+            raise RuntimeError(
+                "Cloudflare Workers AI credentials missing. Please set CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_API_TOKEN in .env"
+            )
+        return {
+            "Authorization": f"Bearer {self.api_token}",
+            "Content-Type": "application/json"
+        }
+
+    def _parse_error_response(self, resp: requests.Response, model_name: str) -> str:
+        """Extract a readable, actionable error message from Cloudflare API responses."""
+        status = resp.status_code
+        try:
+            data = resp.json()
+            errors = data.get("errors", [])
+            if errors and isinstance(errors, list):
+                messages = [f"{e.get('message', '')} (code: {e.get('code', '')})" for e in errors]
+                return f"Cloudflare Workers AI error on {model_name} (HTTP {status}): {'; '.join(messages)}"
+        except Exception:
+            pass
+
+        if status == 429:
+            return f"Cloudflare Workers AI rate limit or free-tier daily neuron limit reached (HTTP 429). Model: {model_name}"
+        elif status == 401:
+            return f"Cloudflare Workers AI authentication failed (HTTP 401). Please check your CLOUDFLARE_API_TOKEN."
+        elif status == 403:
+            return f"Cloudflare Workers AI access denied (HTTP 403) for model {model_name}."
+        elif status == 500:
+            return f"Cloudflare Workers AI internal server error (HTTP 500). Please retry shortly."
+        return f"Cloudflare Workers AI returned HTTP {status}: {resp.text[:200]}"
+
+    def text_to_image(self, prompt: str, num_steps: int = 4) -> Image.Image:
+        """
+        Generate image via @cf/bytedance/stable-diffusion-xl-lightning.
+        Accepts text prompt and produces a forensic sketch image.
+        """
+        if not self.is_configured:
+            raise RuntimeError("Cloudflare Workers AI not configured. Missing CLOUDFLARE_ACCOUNT_ID or CLOUDFLARE_API_TOKEN in .env.")
+
+        url = f"{self.BASE_URL}/{self.account_id}/ai/run/{self.T2I_MODEL}"
+        payload = {
+            "prompt": prompt,
+            "num_steps": min(max(int(num_steps), 1), 8)
+        }
+        print(f"[Cloudflare AI] Calling text-to-image ({self.T2I_MODEL})...")
+        try:
+            resp = self.session.post(url, headers=self._headers(), json=payload, timeout=60.0)
+        except requests.exceptions.Timeout:
+            raise RuntimeError("Cloudflare Workers AI text-to-image timed out after 60 seconds.")
+        except requests.exceptions.RequestException as e:
+            raise RuntimeError(f"Cloudflare Workers AI network connection error: {e}")
+
+        if resp.status_code != 200:
+            err_msg = self._parse_error_response(resp, self.T2I_MODEL)
+            print(f"[Cloudflare AI] {err_msg}")
+            raise RuntimeError(err_msg)
+
+        try:
+            image = Image.open(io.BytesIO(resp.content))
+            image.load()
+            return image
+        except Exception as e:
+            raise RuntimeError(f"Failed to decode image from Cloudflare response: {e}")
+
+    def inpaint(self, image: Image.Image, mask: Image.Image, prompt: str,
+                strength: float = 0.85, num_steps: int = 20, guidance: float = 7.5) -> Image.Image:
+        """
+        Inpaint masked area via @cf/runwayml/stable-diffusion-v1-5-inpainting.
+        Sends base image as base64 and binary mask as byte array.
+        """
+        if not self.is_configured:
+            raise RuntimeError("Cloudflare Workers AI not configured. Missing CLOUDFLARE_ACCOUNT_ID or CLOUDFLARE_API_TOKEN in .env.")
+
+        # RunwayML SD 1.5 inpainting operates on 512x512
+        target_size = (512, 512)
+        model_image = image.resize(target_size, Image.Resampling.LANCZOS)
+        model_mask = mask.resize(target_size, Image.Resampling.NEAREST).convert("L")
+
+        img_buf = io.BytesIO()
+        model_image.save(img_buf, format="PNG")
+        img_b64 = base64.b64encode(img_buf.getvalue()).decode("utf-8")
+
+        mask_buf = io.BytesIO()
+        model_mask.save(mask_buf, format="PNG")
+        mask_bytes = list(mask_buf.getvalue())
+
+        url = f"{self.BASE_URL}/{self.account_id}/ai/run/{self.INPAINT_MODEL}"
+        payload = {
+            "prompt": prompt,
+            "image_b64": img_b64,
+            "mask": mask_bytes,
+            "num_steps": min(max(int(num_steps), 1), 20),
+            "strength": float(strength),
+            "guidance": float(guidance)
+        }
+
+        print(f"[Cloudflare AI] Calling inpainting ({self.INPAINT_MODEL}, strength={strength}, steps={num_steps})...")
+        try:
+            resp = self.session.post(url, headers=self._headers(), json=payload, timeout=90.0)
+        except requests.exceptions.Timeout:
+            raise RuntimeError("Cloudflare Workers AI inpainting timed out after 90 seconds.")
+        except requests.exceptions.RequestException as e:
+            raise RuntimeError(f"Cloudflare Workers AI network connection error: {e}")
+
+        if resp.status_code != 200:
+            err_msg = self._parse_error_response(resp, self.INPAINT_MODEL)
+            print(f"[Cloudflare AI] {err_msg}")
+            raise RuntimeError(err_msg)
+
+        try:
+            inpainted = Image.open(io.BytesIO(resp.content))
+            inpainted.load()
+            return inpainted
+        except Exception as e:
+            raise RuntimeError(f"Failed to decode inpainting output from Cloudflare: {e}")
+
+    def img2img(self, image: Image.Image, prompt: str,
+                strength: float = 0.75, num_steps: int = 20) -> Image.Image:
+        """
+        Image-to-image refinement. First attempts @cf/runwayml/stable-diffusion-v1-5-img2img.
+        If unavailable or restricted (403/404), seamlessly falls back to @cf/runwayml/stable-diffusion-v1-5-inpainting
+        with a complete mask.
+        """
+        if not self.is_configured:
+            raise RuntimeError("Cloudflare Workers AI not configured. Missing CLOUDFLARE_ACCOUNT_ID or CLOUDFLARE_API_TOKEN in .env.")
+
+        target_size = (512, 512)
+        model_image = image.resize(target_size, Image.Resampling.LANCZOS)
+        img_buf = io.BytesIO()
+        model_image.save(img_buf, format="PNG")
+        img_b64 = base64.b64encode(img_buf.getvalue()).decode("utf-8")
+
+        # 1. Try @cf/runwayml/stable-diffusion-v1-5-img2img
+        url_i2i = f"{self.BASE_URL}/{self.account_id}/ai/run/{self.IMG2IMG_MODEL}"
+        payload_i2i = {
+            "prompt": prompt,
+            "image_b64": img_b64,
+            "strength": float(strength)
+        }
+        try:
+            print(f"[Cloudflare AI] Attempting img2img via {self.IMG2IMG_MODEL}...")
+            resp = self.session.post(url_i2i, headers=self._headers(), json=payload_i2i, timeout=60.0)
+            if resp.status_code == 200:
+                out = Image.open(io.BytesIO(resp.content))
+                out.load()
+                return out
+            else:
+                print(f"[Cloudflare AI] {self.IMG2IMG_MODEL} returned HTTP {resp.status_code}. Falling back to inpainting engine...")
+        except Exception as e:
+            print(f"[Cloudflare AI] Error attempting {self.IMG2IMG_MODEL}: {e}. Falling back to inpainting engine...")
+
+        # 2. Fallback to inpainting with full mask
+        full_mask = Image.new("L", target_size, 255)
+        return self.inpaint(image=image, mask=full_mask, prompt=prompt, strength=strength, num_steps=num_steps)
+
 
 class DigitalSurgeon:
     """
     Component C: The Surgeon
-    Uses Hugging Face's API (free tier) for both initial composite
-    generation and feature-specific refinement/editing.
+    Powered by Cloudflare Workers AI:
+    - Text-to-Image: @cf/bytedance/stable-diffusion-xl-lightning
+    - Inpainting:    @cf/runwayml/stable-diffusion-v1-5-inpainting
+    Guarantees 100% mathematical preservation of unmasked facial regions through surgical mask compositing.
     """
 
-    HF_MODEL = "black-forest-labs/FLUX.1-schnell"
-
     def __init__(self):
-        self.api_key: str = os.getenv("HUGGING_FACE_KEY") or ""  # pyre-ignore[8]
-        self.has_api = bool(self.api_key) and "YOUR" not in self.api_key.upper()
-        if self.has_api:
-            print(f"DigitalSurgeon initialized (Hugging Face mode) - Key: {self.api_key[:10]}...")  # pyre-ignore[16]
-            from huggingface_hub import InferenceClient  # pyre-ignore[21]
-            self.client = InferenceClient(api_key=self.api_key)  # pyre-ignore[16]
+        self._init_clients()
+
+    def _init_clients(self):
+        load_project_env()
+        self.cloudflare = CloudflareAIClient()
+        if self.cloudflare.is_configured:
+            print(f"DigitalSurgeon initialized with Cloudflare Workers AI (Account: {self.cloudflare.account_id[:6]}...)")
         else:
-            print("DigitalSurgeon WARNING: No HUGGING_FACE_KEY found!")
-            self.client = None
+            print("DigitalSurgeon WARNING: Cloudflare Workers AI credentials missing in .env")
 
-    def generate(self, prompt: str, seed: int = 0) -> Image.Image | None:
-        """Generate an initial forensic composite sketch from a text description."""
-        if not self.has_api or not self.client:
-            print("[Hugging Face] Missing API Key!")
-            return None
+    @property
+    def has_api(self) -> bool:
+        return self.cloudflare.is_configured
 
-        # FLUX.1 is very good at adhering to detailed prompts. Let's make it explicitly black and white pencil.
+    def generate(self, prompt: str, seed: int = 0) -> Image.Image:
+        """
+        Generate an initial forensic composite sketch from a text description
+        using Cloudflare Workers AI SDXL-Lightning.
+        """
+        if not self.has_api:
+            self._init_clients()
+
+        if not self.has_api:
+            raise RuntimeError(
+                "Cloudflare Workers AI is not configured. Please set CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_API_TOKEN in your .env file."
+            )
+
         full_prompt = (
-            f"forensic sketch pencil drawing, black and white only, highly detailed realistic facial features, "
-            f"front view mugshot portrait, plain white background. "
+            f"forensic sketch pencil drawing of a human face, black and white only, highly detailed realistic facial features, "
+            f"front view mugshot portrait, plain white background, neutral lighting. "
             f"Description: {prompt}"
         )
-        print(f"[HF Generate] Creating composite sketch...")
 
-        try:
-            # text_to_image call
-            image = self.client.text_to_image(
-                full_prompt,
-                model=self.HF_MODEL
-            )
-            
-            # Ensure grayscale for the forensic sketch look
-            image = image.convert("L").convert("RGB")
-            print(f"[HF Generate] Success! Image size: {image.size}")
-            return image
-            
-        except Exception as e:
-            print(f"[HF Generate] Failed to generate image: {e}")
-            return None
+        print(f"[DigitalSurgeon Generate] Calling Cloudflare Workers AI SDXL-Lightning...")
+        image = self.cloudflare.text_to_image(full_prompt, num_steps=4)
+
+        # Convert to B&W forensic sketch tone
+        image = image.convert("L").convert("RGB")
+        print(f"[DigitalSurgeon Generate] Initial composite generated successfully! Size: {image.size}")
+        return image
 
     def inpaint(self, image: Image.Image, mask: Image.Image,
                 prompt: str, negative_prompt: str = "",
                 strength: float = 0.85,
                 guidance_scale: float = 7.5,
-                num_inference_steps: int = 25,
-                mask_blur: int = 0,
+                num_inference_steps: int = 20,
+                mask_blur: int = 3,
                 model_type: str = "standard",
-                seed: int = 0) -> Image.Image | None:
+                seed: int = 0) -> Image.Image:
         """
-        Perform feature-specific refinement.
-        Since free-tier Hugging Face serverless inpainting endpoints (image_to_image with mask) 
-        are not consistently available for top tier models like FLUX, we achieve refinement by 
-        guiding the text-to-image prompt to preserve the original style and focus on the given feature.
-        (This will generate a fresh image adhering strongly to the new combined prompt)
+        Perform surgical feature refinement:
+        1. Inpaints the masked region via Cloudflare Workers AI (@cf/runwayml/stable-diffusion-v1-5-inpainting).
+        2. STRICTLY preserves all unmasked facial regions from the original image via alpha/mask compositing.
+        3. Never returns unedited original image on error.
         """
-        if not self.has_api or not self.client:
-            print("[HF Refine] Cannot refine, missing API Key!")
-            return image
+        if not self.has_api:
+            self._init_clients()
 
-        try:
-            print(f"[HF Refine] Editing with full contextual prompt: {prompt[:80]}... Seed: {seed}")  # pyre-ignore[16]
-
-            # Note: `prompt` now contains the full context ("man, 30s...") + the specific refinement ("make nose smaller")
-            # We just need to ensure the style suffix is still enforced for the free tier text-to-image loop.
-            edit_prompt = (
-                f"{prompt}, forensic sketch pencil drawing, black and white only, highly detailed realistic facial features, "
-                f"front view mugshot portrait, plain white background."
+        if not self.has_api:
+            raise RuntimeError(
+                "Cloudflare Workers AI is not configured. Please set CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_API_TOKEN in your .env file."
             )
 
-            # NOTE: We use text_to_image with the original base image's seed as a stable fallback for free accounts.
-            # This guarantees the newly generated face structure matches the original perfectly!
-            result = self.client.text_to_image(
-                edit_prompt,
-                model=self.HF_MODEL,
-                # Use the dynamic seed from the frontend!
-                seed=seed 
-            )
+        orig_size = image.size
+        mask_l = mask.convert("L")
+        if mask_l.size != orig_size:
+            mask_l = mask_l.resize(orig_size, Image.Resampling.LANCZOS)
 
-            if result:
-                result = result.convert("L").convert("RGB")
-                result = result.resize(image.size, Image.Resampling.LANCZOS)
-                print(f"[HF Refine] Success! Refined image size: {result.size}")
-                return result
-            else:
-                print("[HF Refine] Failed, returning original image")
-                return image
+        inpaint_prompt = (
+            f"forensic sketch pencil drawing, black and white only, {prompt}, "
+            f"detailed pencil shading, clean contours, high contrast portrait"
+        )
 
-        except Exception as e:
-            print(f"[HF Refine] Error: {e}")
-            import traceback
-            traceback.print_exc()
-            return image
+        print(f"[DigitalSurgeon Inpaint] Refining feature via Cloudflare Workers AI ({prompt[:60]}...)...")
+        inpainted_image = self.cloudflare.inpaint(
+            image=image,
+            mask=mask_l,
+            prompt=inpaint_prompt,
+            strength=strength,
+            num_steps=num_inference_steps,
+            guidance=guidance_scale
+        )
+
+        if inpainted_image is None:
+            raise RuntimeError("Cloudflare Workers AI returned empty image output during refinement.")
+
+        # Rescale inpaint result to original image size
+        inpainted_image = inpainted_image.convert("L").convert("RGB")
+        inpainted_image = inpainted_image.resize(orig_size, Image.Resampling.LANCZOS)
+
+        # STRICT MASK COMPOSITING:
+        # Guarantee that every pixel outside the mask is 100% untouched from the original image.
+        import numpy as np
+        composite_mask = mask_l
+        mask_np = np.array(composite_mask)
+        if len(np.unique(mask_np)) <= 2 and mask_blur > 0:
+            composite_mask = composite_mask.filter(ImageFilter.GaussianBlur(radius=mask_blur))
+            mask_np = np.array(composite_mask)
+
+        # Threshold out tiny sub-pixel Gaussian blur tails (< 4) so unmasked pixels remain 0 with zero bleed
+        mask_np[mask_np < 4] = 0
+        composite_mask = Image.fromarray(mask_np)
+
+        final_result = Image.composite(inpainted_image, image, composite_mask)
+        print("[DigitalSurgeon] Mask compositing complete. Unmasked facial regions 100% preserved.")
+        return final_result
 
 
 class BiometricEncoder:

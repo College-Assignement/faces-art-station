@@ -1,4 +1,4 @@
-﻿from fastapi import FastAPI, HTTPException, Form, Request  # pyre-ignore[21]
+from fastapi import FastAPI, HTTPException, Form, Request  # pyre-ignore[21]
 from fastapi.middleware.cors import CORSMiddleware  # pyre-ignore[21]
 from fastapi.exceptions import RequestValidationError  # pyre-ignore[21]
 from fastapi.responses import JSONResponse  # pyre-ignore[21]
@@ -82,10 +82,17 @@ async def generate_composite(prompt: str = Form(...), seed: int = Form(0)):
             
         print(f"[Generate] Requesting initial composite from Stable Diffusion...")
         
-        result_image = surgeon.generate(prompt=prompt, seed=seed)  # pyre-ignore[16]
+        try:
+            result_image = surgeon.generate(prompt=prompt, seed=seed)  # pyre-ignore[16]
+        except RuntimeError as re:
+            print(f"[Generate] AI Service error: {re}")
+            raise HTTPException(status_code=502, detail=str(re))
+        except Exception as ge:
+            print(f"[Generate] Generation error: {ge}")
+            raise HTTPException(status_code=502, detail=f"Image generation failed: {str(ge)}")
         
         if result_image is None:
-            raise HTTPException(status_code=502, detail="Image generation service failed (check API keys or logs)")
+            raise HTTPException(status_code=502, detail="Image generation service returned empty result. Please check API keys or service logs.")
 
         # Convert to base64 for frontend consumption
         buffered = io.BytesIO()
@@ -148,8 +155,8 @@ async def refine_feature(
         # Use simple fallback strategy which now includes the 'Nose Box' logic
         mask = identifier.get_mask(original_image, feature_name, strategy="auto")  # pyre-ignore[16]
         
-        # 3. Post-Process Mask
-        processed_mask = identifier.process_mask(mask)  # pyre-ignore[16]
+        # 3. Post-Process Mask with surgical boundary enforcement
+        processed_mask = identifier.process_mask(mask, feature_name=feature_name)  # pyre-ignore[16]
 
         # 4. Step 2: The "Surgeon" (Inpainting)
         print(f"Step 2: Performing refinement...")
@@ -164,73 +171,100 @@ async def refine_feature(
         
         # Branch A: Surgical Nose Job
         if "nose" in feature_lower:
-            print(">>> ACTIVATING NUCLEAR SURGICAL NOSE JOB PIPELINE (SDXL) <<<")
+            print(">>> ACTIVATING SURGICAL NOSE JOB PIPELINE <<<")
             
             # Check if user selected one of our preset styles
-            base_prompt = full_prompt # Default to what they sent
-            
-            # Map known styles
+            nose_desc = refinement_prompt
             for style, style_prompt in NOSE_PROMPTS.items():
                 if style in lower_prompt or style in feature_lower:
-                    base_prompt = f"{full_prompt}, but specifically making the nose {style_prompt}"
+                    nose_desc = style_prompt
                     break
             
-            # SDXL Specific Prompting (2D Flat Art Style)
-            actual_prompt = f"Macro view of a {base_prompt}, 2D flat line art, clean contour drawing, minimal shading, high contrast, monochrome, technical illustration style"
-            negative_prompt = "color, realistic, photo, blur, double nose, painting, 3d render, deformed, anatomy error, rough sketch, heavy shading, gradients"
-            
-            # CRITICAL NUCLEAR PARAMETERS
-            strength_val = 1.0  # COMPLETE DESTRUCTION of old pixels
-            guidance_scale_val = 15.0 # Force AI to listen
-            steps_val = 50 # Higher quality
-            mask_blur_val = 5
-            model_type_val = "sdxl" # Signal to use SDXL
+            actual_prompt = f"forensic sketch pencil drawing of a human nose, specifically {nose_desc}, black and white line art, detailed pencil shading, clean contours, technical illustration style"
+            negative_prompt = "color, realistic photo, blur, double nose, deformed, extra nostrils, rough sketch, heavy shading, 3d render"
+            strength_val = 0.90
+            guidance_scale_val = 7.5
+            steps_val = 20
+            mask_blur_val = 3
+            model_type_val = "cloudflare"
 
         # Branch B: Removal (Beards, glasses, etc.)
         elif any(k in lower_prompt for k in ["remove", "without", "no ", "delete", "gone", "clean-shaven", "bare face"]):
             print(f"Detected REMOVAL intent for: {feature_name}")
-            actual_prompt = f"{full_prompt}, natural smooth skin texture, clean face, detailed, seamless blending"
-            negative_prompt = f"beard, mustache, moustache, stubble, facial hair, {feature_name}, distortion, unnatural"
-            strength_val = 0.90
-            guidance_scale_val = 7.5
-            steps_val = 25
-            mask_blur_val = 0
-            model_type_val = "standard"
-            
-        # Branch C: Hair (Needs volume)
-        elif feature_lower in ["hair", "hairstyle", "hairStyle"] or "hair" in lower_prompt:
-            print(f"Detected HAIRSTYLE modification")
-            actual_prompt = f"{full_prompt}. Draw this hairstyle extending OUTWARDS beyond the current head shape. High quality forensic sketch."
-            negative_prompt = "bald, half-bald, receding hairline, thin hair, low quality"
-            strength_val = 0.95
-            guidance_scale_val = 7.5
-            steps_val = 25
-            mask_blur_val = 0
-            model_type_val = "standard"
-            
-        # Branch D: Standard Refinement
-        else:
-            print("Standard refinement pipeline")
-            actual_prompt = full_prompt
-            negative_prompt = "blur, low quality, distortion, artifacts"
+            actual_prompt = f"smooth clean skin texture, bare skin, clean face, detailed forensic sketch, black and white pencil shading"
+            negative_prompt = f"beard, mustache, moustache, stubble, facial hair, {feature_name}, distortion, unnatural, color"
             strength_val = 0.85
             guidance_scale_val = 7.5
-            steps_val = 25
-            mask_blur_val = 0
-            model_type_val = "standard"
+            steps_val = 20
+            mask_blur_val = 3
+            model_type_val = "cloudflare"
+            
+        # Branch C: Hair
+        elif feature_lower in ["hair", "hairstyle", "hairStyle"] or "hair" in lower_prompt:
+            print(f"Detected HAIRSTYLE modification")
+            actual_prompt = f"forensic sketch pencil drawing of hairstyle: {refinement_prompt}, black and white only, detailed pencil strokes"
+            negative_prompt = "deformed, blurry, color, realistic photo, low quality"
+            strength_val = 0.90
+            guidance_scale_val = 7.5
+            steps_val = 20
+            mask_blur_val = 3
+            model_type_val = "cloudflare"
+            
+        # Branch D: Surgical Eye Refinement
+        elif any(k in feature_lower for k in ["eye", "eyes", "eyeball", "eyelid"]):
+            print(f">>> ACTIVATING SURGICAL EYES PIPELINE <<<")
+            actual_prompt = f"forensic sketch pencil drawing of human eyes, specifically {refinement_prompt}, black and white line art, detailed pencil shading, clean contours, symmetrical realistic pupils and irises"
+            negative_prompt = "color, realistic photo, blur, deformed, extra eyes, double iris, 3d render, distorted"
+            strength_val = 0.85
+            guidance_scale_val = 7.5
+            steps_val = 20
+            mask_blur_val = 3
+            model_type_val = "cloudflare"
 
-        result_image = surgeon.inpaint(  # pyre-ignore[16]
-            image=original_image,
-            mask=processed_mask,
-            prompt=actual_prompt,
-            negative_prompt=negative_prompt,
-            strength=strength_val,
-            guidance_scale=guidance_scale_val,
-            num_inference_steps=steps_val,
-            mask_blur=mask_blur_val,
-            model_type=model_type_val,
-            seed=seed
-        )
+        # Branch E: Surgical Lips / Mouth Refinement
+        elif any(k in feature_lower for k in ["lip", "lips", "mouth", "smile"]):
+            print(f">>> ACTIVATING SURGICAL LIPS PIPELINE <<<")
+            actual_prompt = f"forensic sketch pencil drawing of human lips and mouth, specifically {refinement_prompt}, black and white line art, detailed pencil shading, clean contours, natural lip texture"
+            negative_prompt = "color, realistic photo, blur, deformed lips, extra teeth, distortion, 3d render"
+            strength_val = 0.85
+            guidance_scale_val = 7.5
+            steps_val = 20
+            mask_blur_val = 3
+            model_type_val = "cloudflare"
+
+        # Branch F: General Refinement (jaw, chin, cheekbones, etc.)
+        else:
+            print(f"Standard surgical refinement pipeline for {feature_name}")
+            actual_prompt = f"forensic sketch pencil drawing of {feature_name}, {refinement_prompt}, black and white only, detailed pencil line art"
+            negative_prompt = "color, realistic photo, 3d render, blur, low quality, distortion, artifacts"
+            strength_val = 0.85
+            guidance_scale_val = 7.5
+            steps_val = 20
+            mask_blur_val = 3
+            model_type_val = "cloudflare"
+
+        try:
+            result_image = surgeon.inpaint(  # pyre-ignore[16]
+                image=original_image,
+                mask=processed_mask,
+                prompt=actual_prompt,
+                negative_prompt=negative_prompt,
+                strength=strength_val,
+                guidance_scale=guidance_scale_val,
+                num_inference_steps=steps_val,
+                mask_blur=mask_blur_val,
+                model_type=model_type_val,
+                seed=seed
+            )
+        except RuntimeError as re:
+            print(f"[Refine] AI Service error: {re}")
+            raise HTTPException(status_code=502, detail=str(re))
+        except Exception as ge:
+            print(f"[Refine] Refinement error: {ge}")
+            raise HTTPException(status_code=502, detail=f"Refinement failed: {str(ge)}")
+
+        if result_image is None:
+            raise HTTPException(status_code=502, detail="Refinement service returned empty result.")
 
         # 5. Encode Response
         buffered = io.BytesIO()

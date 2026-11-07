@@ -6,8 +6,15 @@ const BACKEND_URL = 'http://localhost:8000/api/refine-feature';
 
 const handleApiError = (error: unknown, context: 'generation' | 'refinement'): never => {
   console.error(`Error during image ${context}:`, error);
-  const originalMessage = error instanceof Error ? error.message : 'Unknown error';
-  throw new Error(`Failed to ${context === 'generation' ? 'generate composite' : 'refine image'}: ${originalMessage}`);
+  const prefix = context === 'generation' ? 'Failed to generate composite' : 'Failed to refine image';
+  let message = error instanceof Error ? error.message : 'Unknown error';
+
+  // Prevent duplicate prefixes (e.g., "Failed to generate composite: Failed to generate composite: ...")
+  while (message.startsWith(`${prefix}: `)) {
+    message = message.slice(`${prefix}: `.length);
+  }
+
+  throw new Error(`${prefix}: ${message}`);
 }
 
 /**
@@ -128,13 +135,26 @@ export const mockApiService = {
       formData.append('seed', String(seed ?? 0));
 
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 180000); // 3-min timeout for Gemini
+      const timeoutId = setTimeout(() => controller.abort(), 180000); // 3-min timeout
 
-      const response = await fetch(BACKEND_GENERATE_URL, {
-        method: 'POST',
-        body: formData,
-        signal: controller.signal,
-      });
+      let response: Response;
+      try {
+        response = await fetch(BACKEND_GENERATE_URL, {
+          method: 'POST',
+          body: formData,
+          signal: controller.signal,
+        });
+      } catch (fetchError: unknown) {
+        clearTimeout(timeoutId);
+        if (fetchError instanceof DOMException && fetchError.name === 'AbortError') {
+          throw new Error('Image generation timed out after 3 minutes. Please try again.');
+        }
+        console.error('Network connection error to backend:', fetchError);
+        throw new Error(
+          'Cannot connect to backend server at http://localhost:8000. ' +
+          'Please ensure the Python backend is running (run: python backend/main.py).'
+        );
+      }
       clearTimeout(timeoutId);
 
       if (response.ok) {
@@ -150,14 +170,19 @@ export const mockApiService = {
       let errorDetail = `Backend returned HTTP ${response.status}`;
       try {
         const errData = await response.json();
-        if (errData.detail) errorDetail = errData.detail;
+        if (errData.detail) {
+          if (typeof errData.detail === 'string') {
+            errorDetail = errData.detail;
+          } else if (Array.isArray(errData.detail)) {
+            errorDetail = errData.detail.map((d: any) => d.msg || JSON.stringify(d)).join(', ');
+          } else {
+            errorDetail = JSON.stringify(errData.detail);
+          }
+        }
       } catch { /* ignore parse error */ }
       
-      throw new Error(`Failed to generate composite: ${errorDetail}`);
+      throw new Error(errorDetail);
     } catch (error) {
-      if (error instanceof DOMException && error.name === 'AbortError') {
-        throw new Error('Image generation timed out (3 min). Please try again.');
-      }
       handleApiError(error, 'generation');
     }
   },
@@ -234,37 +259,8 @@ export const mockApiService = {
       };
 
     } catch (error) {
-      console.error("Backend refinement failed, falling back to Pollinations regeneration...", error);
-
-      // Fallback to old logic if backend fails (e.g. not running)
-      // updatedPrompt is already calculated above, we just need to re-calculate it for fallback scope if we didn't hoist it
-      // For fallback safety, recalculate or use hoisted
-      let updatedPrompt = currentPrompt;
-      const lowerRefinement = refinementPrompt.toLowerCase().trim();
-      const removeMatch = lowerRefinement.match(/^(?:remove|delete|no|without)\s+(.+)$/);
-
-       if (removeMatch) {
-        const termToRemove = removeMatch[1];
-        const regex = new RegExp(`(?:,\\s*)?\\b${termToRemove}\\b(?:\\s*,)?`, 'gi');
-        updatedPrompt = updatedPrompt.replace(regex, '');
-        updatedPrompt = updatedPrompt.replace(/,\s*,/g, ',').replace(/^,\s*/, '').replace(/,\s*$/, '');
-      } else {
-        if (!updatedPrompt.toLowerCase().includes(lowerRefinement)) {
-          updatedPrompt = `${updatedPrompt}, ${refinementPrompt}`;
-        }
-      }
-
-      const styleSuffix = ", forensic sketch style, pencil drawing, black and white, high contrast, detailed shading, front view, straight on, mugshot, symmetrical face";
-      const fullPrompt = `${updatedPrompt}${styleSuffix}`;
-      const encodedPrompt = encodeURIComponent(fullPrompt);
-      const imageUrl = `${POLLINATIONS_URL}/${encodedPrompt}?nologo=true&seed=${seed}`;
-
-      const response = await fetch(imageUrl);
-      if (!response.ok) {
-        throw new Error(`Failed to fetch refined image from Pollinations AI`);
-      }
-
-      return { imageUrl: response.url, updatedPrompt };
+      console.error("Refinement error:", error);
+      handleApiError(error, 'refinement');
     }
   },
 
