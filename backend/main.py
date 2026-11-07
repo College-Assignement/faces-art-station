@@ -232,7 +232,39 @@ async def refine_feature(
             mask_blur_val = 3
             model_type_val = "cloudflare"
 
-        # Branch F: General Refinement (jaw, chin, cheekbones, etc.)
+        # Branch F: Perceived Age / Skin Aging Refinement
+        elif "age" in feature_lower or any(k in lower_prompt for k in ["years old", "age", "older", "younger", "wrinkle", "elderly", "youthful"]):
+            print(f">>> ACTIVATING SURGICAL AGE REFINEMENT PIPELINE <<<")
+            import re
+            age_match = re.search(r'\b(\d{1,2})\b', lower_prompt)
+            target_age = int(age_match.group(1)) if age_match else None
+
+            if target_age and target_age >= 55:
+                age_detail = f"elderly mature adult, {target_age} years old, prominent forehead wrinkles, deep crow's feet wrinkles around eyes, nasolabial laugh lines, mature aging skin texture"
+                neg_detail = "smooth youthful skin, child, teenager, baby"
+            elif target_age and target_age >= 40:
+                age_detail = f"middle-aged adult, {target_age} years old, subtle forehead lines, light crow's feet, mature skin texture"
+                neg_detail = "smooth youthful skin, child, teenager, deep sagging wrinkles"
+            elif target_age and target_age <= 30:
+                age_detail = f"youthful young adult, {target_age} years old, smooth youthful unwrinkled skin, firm skin texture, clear complexion, fresh youthful features"
+                neg_detail = "wrinkles, deep creases, sagging skin, old, elderly, age spots"
+            else:
+                age_detail = f"adult face, natural skin texture, {refinement_prompt}"
+                neg_detail = "distortion, blur, unnatural skin"
+
+            actual_prompt = (
+                f"forensic sketch pencil drawing of human face, specifically {age_detail}, "
+                f"black and white line art, detailed pencil shading, clean contours, "
+                f"maintaining same facial identity and features"
+            )
+            negative_prompt = f"color, realistic photo, 3d render, blur, deformed, distorted, {neg_detail}"
+            strength_val = 0.70
+            guidance_scale_val = 7.5
+            steps_val = 20
+            mask_blur_val = 3
+            model_type_val = "cloudflare"
+
+        # Branch G: General Refinement (jaw, chin, cheekbones, etc.)
         else:
             print(f"Standard surgical refinement pipeline for {feature_name}")
             actual_prompt = f"forensic sketch pencil drawing of {feature_name}, {refinement_prompt}, black and white only, detailed pencil line art"

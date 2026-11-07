@@ -115,7 +115,7 @@ function mapCategoryToMaskName(category: FeatureCategory | 'inferred', prompt: s
     'jawline': 'jaw',
     'cheekbones': 'face',
     'ears': 'face',
-    'skinAge': 'face',
+    'skinAge': 'age',
     'accessories': 'face',
     'expression': 'face',
   };

@@ -17,56 +17,6 @@ const RefinementPrompt: React.FC<RefinementPromptProps> = ({ onRefine, isLoading
   const [prevAge, setPrevAge] = React.useState(DEFAULT_AGE);
   const [prevBuild, setPrevBuild] = React.useState(DEFAULT_BUILD_VALUE);
 
-  // Debounce timer ref
-  const debounceTimerRef = React.useRef<NodeJS.Timeout | null>(null);
-
-  // Auto-apply refinements when sliders change
-  React.useEffect(() => {
-    // Clear existing timer
-    if (debounceTimerRef.current) {
-      clearTimeout(debounceTimerRef.current);
-    }
-
-    // Only apply if values actually changed from previous values
-    const ageChanged = age !== prevAge;
-    const buildChanged = build !== prevBuild;
-
-    if ((ageChanged || buildChanged) && !isLoading) {
-      // Debounce the refinement call by 800ms to avoid too many API calls
-      debounceTimerRef.current = setTimeout(() => {
-        const refinementParts: string[] = [];
-
-        if (age !== DEFAULT_AGE) {
-          refinementParts.push(`make the person appear to be around ${age} years old`);
-        }
-
-        if (build !== DEFAULT_BUILD_VALUE) {
-          let buildDesc = '';
-          if (build < 65) buildDesc = 'a thinner, more slender facial structure';
-          else if (build > 85) buildDesc = 'a heavier, fuller facial structure';
-
-          if (buildDesc) {
-            refinementParts.push(`adjust the face to have ${buildDesc}`);
-          }
-        }
-
-        const combinedPrompt = refinementParts.join(', ');
-
-        if (combinedPrompt) {
-          onRefine(combinedPrompt);
-          setPrevAge(age);
-          setPrevBuild(build);
-        }
-      }, 800);
-    }
-
-    return () => {
-      if (debounceTimerRef.current) {
-        clearTimeout(debounceTimerRef.current);
-      }
-    };
-  }, [age, build, isLoading, onRefine, prevAge, prevBuild]);
-
   const handleRefineClick = () => {
     if (isLoading) return;
 
@@ -77,11 +27,19 @@ const RefinementPrompt: React.FC<RefinementPromptProps> = ({ onRefine, isLoading
       refinementParts.push(textPrompt);
     }
 
-    if (age !== DEFAULT_AGE) {
-      refinementParts.push(`make the person appear to be around ${age} years old`);
+    if (age !== prevAge) {
+      if (age >= 60) {
+        refinementParts.push(`make the person appear around ${age} years old, elderly mature adult, prominent forehead wrinkles, crow's feet wrinkles, laugh lines, mature aging skin texture`);
+      } else if (age >= 45) {
+        refinementParts.push(`make the person appear around ${age} years old, middle-aged adult, subtle forehead lines, light crow's feet, mature skin texture`);
+      } else if (age <= 28) {
+        refinementParts.push(`make the person appear around ${age} years old, youthful young adult, smooth unwrinkled skin, firm tight complexion, youthful fresh skin`);
+      } else {
+        refinementParts.push(`make the person appear around ${age} years old, natural adult skin texture`);
+      }
     }
 
-    if (build !== DEFAULT_BUILD_VALUE) {
+    if (build !== prevBuild) {
       let buildDesc = '';
       if (build < 65) buildDesc = 'a thinner, more slender facial structure';
       else if (build > 85) buildDesc = 'a heavier, fuller facial structure';
@@ -95,16 +53,14 @@ const RefinementPrompt: React.FC<RefinementPromptProps> = ({ onRefine, isLoading
 
     if (combinedPrompt) {
       onRefine(combinedPrompt);
-      // Reset state after submission
+      // Reset text prompt and record current slider values as applied
       setPrompt('');
-      setAge(DEFAULT_AGE);
-      setBuild(DEFAULT_BUILD_VALUE);
-      setPrevAge(DEFAULT_AGE);
-      setPrevBuild(DEFAULT_BUILD_VALUE);
+      setPrevAge(age);
+      setPrevBuild(build);
     }
   };
 
-  const hasChanges = prompt.trim().length > 0 || age !== DEFAULT_AGE || build !== DEFAULT_BUILD_VALUE;
+  const hasChanges = prompt.trim().length > 0 || age !== prevAge || build !== prevBuild;
 
   return (
     <div className="glass-morphism rounded-2xl p-5 flex flex-col gap-5 border border-white/5 shadow-lg">
