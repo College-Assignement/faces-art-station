@@ -102,38 +102,6 @@ export const visualLibrary: VisualFeatureCategory[] = [
         ],
     },
     {
-        id: 'cheekbones',
-        name: 'Cheekbones',
-        features: [
-            { label: 'High', preview: 'high-cheekbones', prompt: 'high, prominent cheekbones' },
-            { label: 'Low', preview: 'low-cheekbones', prompt: 'low-set cheekbones' },
-            { label: 'Prominent', preview: 'prominent-cheekbones', prompt: 'very prominent, defined cheekbones' },
-            { label: 'Flat', preview: 'flat-cheekbones', prompt: 'flat, subtle cheekbones' },
-        ],
-    },
-    {
-        id: 'ears',
-        name: 'Ears',
-        features: [
-            { label: 'Small', preview: 'small-ears', prompt: 'small, close-set ears' },
-            { label: 'Large', preview: 'large-ears', prompt: 'large, prominent ears' },
-            { label: 'Protruding', preview: 'protruding-ears', prompt: 'ears that stick out from the head' },
-            { label: 'Attached Lobes', preview: 'attached-lobes', prompt: 'earlobes attached to the head' },
-            { label: 'Detached Lobes', preview: 'detached-lobes', prompt: 'earlobes that hang freely' },
-        ],
-    },
-    {
-        id: 'skinAge',
-        name: 'Skin Texture',
-        features: [
-            { label: 'Smooth', preview: 'smooth-skin', prompt: 'smooth, youthful skin texture' },
-            { label: 'Wrinkled', preview: 'wrinkled-skin', prompt: 'wrinkled, aged skin with visible lines' },
-            { label: 'Scarred', preview: 'scarred-skin', prompt: 'skin with visible scars' },
-            { label: 'Freckled', preview: 'freckled-skin', prompt: 'skin with freckles' },
-            { label: 'Aged', preview: 'aged-skin', prompt: 'mature, aged skin with age spots and lines' },
-        ],
-    },
-    {
         id: 'accessories',
         name: 'Accessories',
         features: [
