@@ -239,26 +239,33 @@ async def refine_feature(
             age_match = re.search(r'\b(\d{1,2})\b', lower_prompt)
             target_age = int(age_match.group(1)) if age_match else None
 
+            is_younger = any(k in lower_prompt for k in ["younger", "youthful", "young", "smooth", "soften"]) or (target_age and target_age <= 30)
+
             if target_age and target_age >= 55:
-                age_detail = f"elderly mature adult, {target_age} years old, prominent forehead wrinkles, deep crow's feet wrinkles around eyes, nasolabial laugh lines, mature aging skin texture"
+                age_detail = f"facial skin at {target_age} years old, mature adult, prominent forehead wrinkles, defined crow feet wrinkles, deep nasolabial creases, aging skin texture"
                 neg_detail = "smooth youthful skin, child, teenager, baby"
+                strength_val = 0.72
             elif target_age and target_age >= 40:
-                age_detail = f"middle-aged adult, {target_age} years old, subtle forehead lines, light crow's feet, mature skin texture"
-                neg_detail = "smooth youthful skin, child, teenager, deep sagging wrinkles"
-            elif target_age and target_age <= 30:
-                age_detail = f"youthful young adult, {target_age} years old, smooth youthful unwrinkled skin, firm skin texture, clear complexion, fresh youthful features"
+                age_detail = f"facial skin at {target_age} years old, middle-aged adult, visible forehead lines, crow feet wrinkles around eyes, nasolabial laugh lines, mature skin texture"
+                neg_detail = "smooth youthful skin, child, deep sagging wrinkles"
+                strength_val = 0.65
+            elif is_younger or (target_age and target_age <= 30):
+                disp_age = target_age if target_age else 25
+                age_detail = f"facial skin at {disp_age} years old, youthful skin, smooth unwrinkled skin, softened laugh lines, firm skin texture, clear fresh complexion"
                 neg_detail = "wrinkles, deep creases, sagging skin, old, elderly, age spots"
+                strength_val = 0.65
             else:
-                age_detail = f"adult face, natural skin texture, {refinement_prompt}"
+                disp_age = target_age if target_age else 35
+                age_detail = f"facial skin at {disp_age} years old, subtle natural forehead lines, mild laugh lines, natural adult skin texture"
                 neg_detail = "distortion, blur, unnatural skin"
+                strength_val = 0.55
 
             actual_prompt = (
-                f"forensic sketch pencil drawing of human face, specifically {age_detail}, "
+                f"forensic sketch pencil drawing of {age_detail}, "
                 f"black and white line art, detailed pencil shading, clean contours, "
-                f"maintaining same facial identity and features"
+                f"maintaining same facial identity, eyes, nose, lips, jawline"
             )
             negative_prompt = f"color, realistic photo, 3d render, blur, deformed, distorted, {neg_detail}"
-            strength_val = 0.70
             guidance_scale_val = 7.5
             steps_val = 20
             mask_blur_val = 3

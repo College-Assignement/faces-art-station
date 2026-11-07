@@ -79,8 +79,12 @@ class FaceIdentifier:
         # Full face
         "face": "face_mask.png",
         "skin": "face_mask.png",
-        "age": "face_mask.png",
-        "wrinkles": "face_mask.png",
+        
+        # Age-specific skin regions (forehead, crow's feet, tear troughs, nasolabial folds)
+        "age": "age_mask.png",
+        "aging": "age_mask.png",
+        "wrinkle": "age_mask.png",
+        "wrinkles": "age_mask.png",
     }
     
     def __init__(self):
@@ -136,6 +140,13 @@ class FaceIdentifier:
             mask_arr[int(h * 0.43):, :] = 0   # Protect nose and mouth
             mask_arr[:, int(w * 0.45):int(w * 0.55)] = 0  # Protect nose bridge
             print("Enforced surgical boundary on EYES mask (nose & lips 100% protected)")
+        elif any(k in feature_lower for k in ["age", "wrinkle"]):
+            # Strictly protect eyes, eyebrows, nose, and lips from age edits
+            mask_arr[int(h * 0.30):int(h * 0.40), int(w * 0.25):int(w * 0.44)] = 0
+            mask_arr[int(h * 0.30):int(h * 0.40), int(w * 0.56):int(w * 0.75)] = 0
+            mask_arr[int(h * 0.41):int(h * 0.59), int(w * 0.37):int(w * 0.63)] = 0
+            mask_arr[int(h * 0.60):int(h * 0.76), int(w * 0.32):int(w * 0.68)] = 0
+            print("Enforced surgical boundary on AGE mask (eyes, nose, lips 100% protected)")
             
         return Image.fromarray(mask_arr)
 
@@ -216,6 +227,11 @@ class FaceIdentifier:
             elif any(k in feature_lower for k in ["eye", "eyes"]):
                 m_arr[int(h * 0.43):, :] = 0   # Protect nose and mouth
                 m_arr[:, int(w * 0.45):int(w * 0.55)] = 0  # Protect nose bridge
+            elif any(k in feature_lower for k in ["age", "wrinkle"]):
+                m_arr[int(h * 0.30):int(h * 0.40), int(w * 0.25):int(w * 0.44)] = 0
+                m_arr[int(h * 0.30):int(h * 0.40), int(w * 0.56):int(w * 0.75)] = 0
+                m_arr[int(h * 0.41):int(h * 0.59), int(w * 0.37):int(w * 0.63)] = 0
+                m_arr[int(h * 0.60):int(h * 0.76), int(w * 0.32):int(w * 0.68)] = 0
 
         return Image.fromarray(m_arr)
 
