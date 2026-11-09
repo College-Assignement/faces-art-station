@@ -153,7 +153,7 @@ async def refine_feature(
         # 2. Step 1: The "Identifier" (Masking)
         print(f"Step 1: Identifying target area for '{feature_name}'...")
         # Use simple fallback strategy which now includes the 'Nose Box' logic
-        mask = identifier.get_mask(original_image, feature_name, strategy="auto")  # pyre-ignore[16]
+        mask = identifier.get_mask(original_image, feature_name, strategy="auto", prompt=refinement_prompt)  # pyre-ignore[16]
         
         # 3. Post-Process Mask with surgical boundary enforcement
         processed_mask = identifier.process_mask(mask, feature_name=feature_name)  # pyre-ignore[16]
@@ -201,10 +201,39 @@ async def refine_feature(
             
         # Branch C: Hair
         elif feature_lower in ["hair", "hairstyle", "hairStyle"] or "hair" in lower_prompt:
-            print(f"Detected HAIRSTYLE modification")
-            actual_prompt = f"forensic sketch pencil drawing of hairstyle: {refinement_prompt}, black and white only, detailed pencil strokes"
-            negative_prompt = "deformed, blurry, color, realistic photo, low quality"
-            strength_val = 0.90
+            print(f">>> ACTIVATING SURGICAL HAIR REFINEMENT PIPELINE <<<")
+            
+            is_long = any(k in lower_prompt for k in ["long", "shoulder", "past shoulders", "chest", "lengthy", "extensions", "ponytail", "flowing", "braid", "dread"])
+            is_curly = any(k in lower_prompt for k in ["curly", "curls", "afro", "wavy", "frizzy", "kinky", "volume", "voluminous", "permed", "ringlets", "coily"])
+            is_bald = any(k in lower_prompt for k in ["bald", "shaved", "buzz", "buzzcut", "clean shaven head", "no hair", "bare head", "bald head", "shaved head", "fade"])
+            is_straight = any(k in lower_prompt for k in ["straight", "sleek", "flat", "smooth"])
+            is_light = any(k in lower_prompt for k in ["light", "blonde", "blond", "grey", "gray", "white", "silver", "highlights"])
+
+            if is_bald:
+                actual_prompt = "forensic sketch pencil drawing of a completely bald head, clean-shaven bald scalp, no hair, smooth bald head, technical police composite sketch, black and white line art"
+                negative_prompt = "hair, long hair, bangs, curls, wavy hair, afro, ponytail, wig, facial hair, deformed, color, photo, low quality"
+                strength_val = 0.85
+            elif is_long:
+                actual_prompt = "forensic sketch pencil drawing of long hair, long straight hair flowing down past the shoulders, detailed hair strands, technical police composite sketch, black and white line art"
+                negative_prompt = "short hair, bald, buzzcut, crop, fade, deformed, color, photo, low quality"
+                strength_val = 0.82
+            elif is_curly:
+                actual_prompt = "forensic sketch pencil drawing of curly hair, defined tight curls, voluminous textured curls, natural ringlets, technical police composite sketch, black and white line art"
+                negative_prompt = "straight hair, flat hair, bald, sleek hair, deformed, color, photo, low quality"
+                strength_val = 0.82
+            elif is_straight:
+                actual_prompt = "forensic sketch pencil drawing of sleek straight hair, smooth straight hair strands, neat flat straight hairstyle, technical police composite sketch, black and white line art"
+                negative_prompt = "curly, wavy, afro, curls, frizzy, permed, bald, deformed, color, photo, low quality"
+                strength_val = 0.82
+            elif is_light:
+                actual_prompt = "forensic sketch pencil drawing of light blonde hair, light-colored hair, white highlights, soft fine pencil linework, bright hair tone, technical police composite sketch, black and white line art"
+                negative_prompt = "dark hair, black hair, heavy black shading, dense dark ink, deformed, color, photo, low quality"
+                strength_val = 0.85
+            else:
+                actual_prompt = f"forensic sketch pencil drawing of hairstyle: {refinement_prompt}, detailed hair strands, technical police composite sketch, black and white line art"
+                negative_prompt = "deformed, blurry, color, realistic photo, low quality"
+                strength_val = 0.82
+
             guidance_scale_val = 7.5
             steps_val = 20
             mask_blur_val = 3

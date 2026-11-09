@@ -91,7 +91,7 @@ class FaceIdentifier:
         self.masks_dir = os.path.join(os.path.dirname(__file__), "..", "public", "masks")
         print(f"FaceIdentifier initialized (pre-made masks)")
 
-    def get_mask(self, image: Image.Image, feature_name: str, strategy: str = "auto") -> Image.Image:
+    def get_mask(self, image: Image.Image, feature_name: str, strategy: str = "auto", prompt: str = "") -> Image.Image:
         """
         Get the surgically isolated mask for the feature.
         Guarantees 0% bleed into other facial regions (nose, eyes, lips, jawline).
@@ -100,6 +100,11 @@ class FaceIdentifier:
         feature_lower = feature_name.lower().strip()
         w, h = image.size
         
+        # Hairstyle-specific dynamic anatomical masking
+        if any(k in feature_lower for k in ["hair", "hairstyle"]):
+            print(f"Generating dynamic surgical hair mask for '{prompt or feature_name}'")
+            return self._generate_hair_mask(image, prompt=prompt)
+
         # Find matching mask file if available
         mask_file = None
         for key, value in self.MASK_MAP.items():
@@ -149,6 +154,74 @@ class FaceIdentifier:
             print("Enforced surgical boundary on AGE mask (eyes, nose, lips 100% protected)")
             
         return Image.fromarray(mask_arr)
+
+    def _generate_hair_mask(self, image: Image.Image, prompt: str = "") -> Image.Image:
+        """
+        Dynamically generate a hairstyle-specific anatomical mask.
+        Covers cranial dome, hairline, temples, and adaptive zones for long/curly/bald/straight styles.
+        Strictly excludes and protects internal facial identity (eyebrows, eyes, nose, mouth).
+        """
+        import numpy as np
+        w, h = image.size
+        mask = Image.new("L", (w, h), 0)
+        draw = ImageDraw.Draw(mask)
+        lower_prompt = prompt.lower().strip()
+
+        is_long = any(k in lower_prompt for k in ["long", "shoulder", "past shoulders", "chest", "lengthy", "extensions", "ponytail", "flowing", "braid", "dread"])
+        is_curly = any(k in lower_prompt for k in ["curly", "curls", "afro", "wavy", "frizzy", "kinky", "volume", "voluminous", "permed", "ringlets", "coily"])
+        is_bald = any(k in lower_prompt for k in ["bald", "shaved", "buzz", "buzzcut", "clean shaven head", "no hair", "bare head", "bald head", "shaved head", "fade"])
+        is_light = any(k in lower_prompt for k in ["light", "blonde", "blond", "grey", "gray", "white", "silver", "highlights"])
+
+        # 1. Base cranial crown (top of head and hairline curve)
+        draw.ellipse([w * 0.08, -h * 0.12, w * 0.92, h * 0.28], fill=255)
+        
+        # 2. Temples and upper sides of skull
+        draw.rectangle([w * 0.05, h * 0.12, w * 0.25, h * 0.46], fill=255)
+        draw.rectangle([w * 0.75, h * 0.12, w * 0.95, h * 0.46], fill=255)
+
+        if is_long:
+            # Long hair extends down the sides past the ears, jawline, neck, and shoulders
+            draw.rectangle([0, h * 0.15, w * 0.32, h * 0.98], fill=255)
+            draw.rectangle([w * 0.68, h * 0.15, w, h * 0.98], fill=255)
+            draw.rectangle([0, h * 0.60, w * 0.36, h * 0.98], fill=255)
+            draw.rectangle([w * 0.64, h * 0.60, w, h * 0.98], fill=255)
+        elif is_curly:
+            # Expanded volume outward and around head
+            draw.ellipse([w * 0.02, -h * 0.16, w * 0.98, h * 0.34], fill=255)
+            draw.rectangle([0, h * 0.10, w * 0.30, h * 0.62], fill=255)
+            draw.rectangle([w * 0.70, h * 0.10, w, h * 0.62], fill=255)
+        elif is_bald:
+            # Bald/shaved scalp: covers cranial crown and hairline
+            draw.ellipse([w * 0.10, -h * 0.08, w * 0.90, h * 0.26], fill=255)
+            draw.rectangle([0, 0, w * 0.22, h * 0.55], fill=255)
+            draw.rectangle([w * 0.78, 0, w, h * 0.55], fill=255)
+        elif is_light:
+            draw.rectangle([0, h * 0.12, w * 0.28, h * 0.55], fill=255)
+            draw.rectangle([w * 0.72, h * 0.12, w, h * 0.55], fill=255)
+        else:
+            # Standard / straight / short: clean up sides if previous hair had flare
+            draw.rectangle([0, h * 0.15, w * 0.26, h * 0.68], fill=255)
+            draw.rectangle([w * 0.74, h * 0.15, w, h * 0.68], fill=255)
+
+        arr = np.array(mask)
+        # 3. Surgical boundary isolation: Eyebrows, eyes, nose, mouth 100% protected
+        arr[int(h * 0.27):int(h * 0.38), int(w * 0.23):int(w * 0.77)] = 0  # Eyebrows
+        arr[int(h * 0.36):int(h * 0.48), int(w * 0.18):int(w * 0.82)] = 0  # Eyes
+        arr[int(h * 0.46):int(h * 0.64), int(w * 0.26):int(w * 0.74)] = 0  # Nose
+        arr[int(h * 0.63):int(h * 0.90), int(w * 0.28):int(w * 0.72)] = 0  # Mouth / Lips
+        arr[int(h * 0.78):, int(w * 0.36):int(w * 0.64)] = 0               # Center neck column
+
+        feathered = Image.fromarray(arr).filter(ImageFilter.GaussianBlur(3))
+        f_arr = np.array(feathered)
+        f_arr[int(h * 0.28):int(h * 0.37), int(w * 0.24):int(w * 0.76)] = 0
+        f_arr[int(h * 0.37):int(h * 0.47), int(w * 0.20):int(w * 0.80)] = 0
+        f_arr[int(h * 0.47):int(h * 0.63), int(w * 0.27):int(w * 0.73)] = 0
+        f_arr[int(h * 0.64):int(h * 0.88), int(w * 0.30):int(w * 0.70)] = 0
+        f_arr[int(h * 0.80):, int(w * 0.38):int(w * 0.62)] = 0
+        f_arr[f_arr < 4] = 0
+
+        print(f"Enforced surgical boundary on dynamic HAIR mask (eyes, eyebrows, nose, mouth 100% protected)")
+        return Image.fromarray(f_arr)
 
     def _generate_fallback_mask(self, image: Image.Image, feature_name: str) -> Image.Image:
         """Generate a feature-specific fallback mask with precise facial coordinates."""
@@ -232,6 +305,13 @@ class FaceIdentifier:
                 m_arr[int(h * 0.30):int(h * 0.40), int(w * 0.56):int(w * 0.75)] = 0
                 m_arr[int(h * 0.41):int(h * 0.59), int(w * 0.37):int(w * 0.63)] = 0
                 m_arr[int(h * 0.60):int(h * 0.76), int(w * 0.32):int(w * 0.68)] = 0
+            elif any(k in feature_lower for k in ["hair", "hairstyle"]):
+                # Surgical protection: Eyebrows, eyes, nose, mouth 100% protected from hair edits
+                m_arr[int(h * 0.28):int(h * 0.37), int(w * 0.24):int(w * 0.76)] = 0  # Eyebrows
+                m_arr[int(h * 0.37):int(h * 0.47), int(w * 0.20):int(w * 0.80)] = 0  # Eyes
+                m_arr[int(h * 0.47):int(h * 0.63), int(w * 0.27):int(w * 0.73)] = 0  # Nose
+                m_arr[int(h * 0.64):int(h * 0.88), int(w * 0.30):int(w * 0.70)] = 0  # Mouth
+                m_arr[int(h * 0.80):, int(w * 0.38):int(w * 0.62)] = 0               # Neck center
 
         return Image.fromarray(m_arr)
 
@@ -341,6 +421,7 @@ class CloudflareAIClient:
             raise RuntimeError(f"Failed to decode image from Cloudflare response: {e}")
 
     def inpaint(self, image: Image.Image, mask: Image.Image, prompt: str,
+                negative_prompt: str = "",
                 strength: float = 0.85, num_steps: int = 20, guidance: float = 7.5) -> Image.Image:
         """
         Inpaint masked area via @cf/runwayml/stable-diffusion-v1-5-inpainting.
@@ -371,6 +452,8 @@ class CloudflareAIClient:
             "strength": float(strength),
             "guidance": float(guidance)
         }
+        if negative_prompt:
+            payload["negative_prompt"] = negative_prompt
 
         print(f"[Cloudflare AI] Calling inpainting ({self.INPAINT_MODEL}, strength={strength}, steps={num_steps})...")
         try:
@@ -510,16 +593,20 @@ class DigitalSurgeon:
         if mask_l.size != orig_size:
             mask_l = mask_l.resize(orig_size, Image.Resampling.LANCZOS)
 
-        inpaint_prompt = (
-            f"forensic sketch pencil drawing, black and white only, {prompt}, "
-            f"detailed pencil shading, clean contours, high contrast portrait"
-        )
+        if "forensic sketch" in prompt.lower():
+            inpaint_prompt = prompt
+        else:
+            inpaint_prompt = (
+                f"forensic sketch pencil drawing, black and white only, {prompt}, "
+                f"detailed pencil shading, clean contours, high contrast portrait"
+            )
 
         print(f"[DigitalSurgeon Inpaint] Refining feature via Cloudflare Workers AI ({prompt[:60]}...)...")
         inpainted_image = self.cloudflare.inpaint(
             image=image,
             mask=mask_l,
             prompt=inpaint_prompt,
+            negative_prompt=negative_prompt,
             strength=strength,
             num_steps=num_inference_steps,
             guidance=guidance_scale
