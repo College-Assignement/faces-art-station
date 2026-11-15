@@ -9,11 +9,13 @@ export const visualLibrary: VisualFeatureCategory[] = [
         name: 'Face Shape',
         features: [
             { label: 'Oval', preview: 'oval-face', prompt: 'an oval face shape' },
-            { label: 'Square', preview: 'square-face', prompt: 'a square face shape' },
             { label: 'Round', preview: 'round-face', prompt: 'a round face shape' },
+            { label: 'Square', preview: 'square-face', prompt: 'a square face shape' },
+            { label: 'Rectangle', preview: 'rectangle-face', prompt: 'a rectangle face shape' },
             { label: 'Heart', preview: 'heart-face', prompt: 'a heart-shaped face' },
-            { label: 'Long', preview: 'long-face', prompt: 'a long, elongated face shape' },
             { label: 'Diamond', preview: 'diamond-face', prompt: 'a diamond-shaped face with wide cheekbones' },
+            { label: 'Oblong', preview: 'oblong-face', prompt: 'an oblong face shape' },
+            { label: 'Long', preview: 'long-face', prompt: 'a long, elongated oblong face shape' },
         ],
     },
     {

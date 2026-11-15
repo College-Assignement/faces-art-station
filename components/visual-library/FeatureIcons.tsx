@@ -39,6 +39,13 @@ export const FaceShapeIcons: Record<string, React.FC<IconProps>> = {
             <line x1="50" y1="32" x2="52" y2="32" opacity="0.3" strokeWidth="1" />
         </svg>
     ),
+    'Rectangle': ({ className }) => (
+        <svg viewBox="0 0 64 64" fill="none" stroke="currentColor" strokeWidth="1.5" className={className}>
+            <rect x="16" y="8" width="32" height="48" rx="3" />
+            <line x1="14" y1="32" x2="16" y2="32" opacity="0.3" strokeWidth="1" />
+            <line x1="48" y1="32" x2="50" y2="32" opacity="0.3" strokeWidth="1" />
+        </svg>
+    ),
     'Round': ({ className }) => (
         <svg viewBox="0 0 64 64" fill="none" stroke="currentColor" strokeWidth="1.5" className={className}>
             <circle cx="32" cy="32" r="20" />
@@ -50,6 +57,13 @@ export const FaceShapeIcons: Record<string, React.FC<IconProps>> = {
         <svg viewBox="0 0 64 64" fill="none" stroke="currentColor" strokeWidth="1.5" className={className}>
             <path d="M32 56 C14 42, 10 28, 14 18 C18 10, 24 9, 32 16 C40 9, 46 10, 50 18 C54 28, 50 42, 32 56Z" />
             <line x1="32" y1="8" x2="32" y2="10" opacity="0.3" strokeWidth="1" />
+        </svg>
+    ),
+    'Oblong': ({ className }) => (
+        <svg viewBox="0 0 64 64" fill="none" stroke="currentColor" strokeWidth="1.5" className={className}>
+            <ellipse cx="32" cy="32" rx="13" ry="26" />
+            <line x1="17" y1="32" x2="19" y2="32" opacity="0.3" strokeWidth="1" />
+            <line x1="45" y1="32" x2="47" y2="32" opacity="0.3" strokeWidth="1" />
         </svg>
     ),
     'Long': ({ className }) => (

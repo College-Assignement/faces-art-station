@@ -125,6 +125,82 @@ NOSE_PROMPTS = {
     "pointed": "Sharp, pointed nose with defined structure"
 }
 
+# The "Face Shape Dictionary" - anatomical, symmetrical forensic composite prompts
+FACE_SHAPE_PROMPTS = {
+    "oval": {
+        "prompt": "forensic sketch pencil drawing of an oval face shape, softly rounded balanced jawline, harmonious cheekbones tapering gently to a smooth rounded chin, symmetrical facial proportions, technical police composite sketch, black and white pencil line art",
+        "negative": "square jaw, wide angular chin, heavy jowls, sharp pointy chin, deformed, asymmetrical, crooked, double chin, color, photo, low quality"
+    },
+    "round": {
+        "prompt": "forensic sketch pencil drawing of a round face shape, full curved cheeks, soft circular jawline, smooth rounded chin, equal face width and height, symmetrical facial contours, technical police composite sketch, black and white pencil line art",
+        "negative": "sharp angular jaw, long chin, narrow face, pointy chin, hollow cheeks, asymmetrical, deformed, color, photo, low quality"
+    },
+    "square": {
+        "prompt": "forensic sketch pencil drawing of a square face shape, strong wide angular jawline, defined horizontal mandibular angles, broad flat square chin, symmetrical structured jaw, technical police composite sketch, black and white pencil line art",
+        "negative": "round chin, soft curved jaw, narrow chin, pointed chin, long oval face, asymmetrical, crooked, deformed, color, photo, low quality"
+    },
+    "rectangle": {
+        "prompt": "forensic sketch pencil drawing of a rectangle face shape, elongated vertical face structure, strong straight jawline with defined angular corners, broad structured chin, symmetrical rectangular facial contour, technical police composite sketch, black and white pencil line art",
+        "negative": "round face, circular jaw, pointed chin, heart face, wide circular cheeks, asymmetrical, crooked, deformed, color, photo, low quality"
+    },
+    "heart": {
+        "prompt": "forensic sketch pencil drawing of a heart face shape, prominent wide cheekbones tapering down to a delicate narrow pointed chin, slender refined jawline, symmetrical heart-shaped facial contour, technical police composite sketch, black and white pencil line art",
+        "negative": "wide square jaw, heavy flat chin, round circular face, jowls, broad chin, asymmetrical, crooked, deformed, color, photo, low quality"
+    },
+    "diamond": {
+        "prompt": "forensic sketch pencil drawing of a diamond face shape, wide high cheekbones tapering sharply inward to a slender pointed chin and narrow temples, angular refined jawline, symmetrical diamond facial contour, technical police composite sketch, black and white pencil line art",
+        "negative": "wide square jaw, flat chin, round full cheeks, heavy jowls, asymmetrical, crooked, deformed, color, photo, low quality"
+    },
+    "oblong": {
+        "prompt": "forensic sketch pencil drawing of an oblong face shape, long slender face with straight vertical cheek lines, narrow elongated jawline tapering to a slightly rounded chin, symmetrical long facial contour, technical police composite sketch, black and white pencil line art",
+        "negative": "wide round face, broad square jaw, circular cheeks, short face, wide chin, asymmetrical, crooked, deformed, color, photo, low quality"
+    }
+}
+
+def validate_face_shape_result(original_image: Image.Image, result_image: Image.Image, mask: Image.Image) -> None:
+    """
+    Validate quality, symmetry, and biometric identity preservation of the refined face shape.
+    Raises RuntimeError if output is malformed, distorted, or corrupted.
+    """
+    import numpy as np
+    if result_image is None:
+        raise RuntimeError("Face shape refinement failed: empty image returned.")
+
+    w, h = result_image.size
+    if (w, h) != original_image.size:
+        raise RuntimeError(f"Face shape refinement error: dimension mismatch ({w}x{h} vs {original_image.size}).")
+
+    arr = np.array(result_image.convert("L"), dtype=float)
+    orig_arr = np.array(original_image.convert("L"), dtype=float)
+    mask_arr = np.array(mask.convert("L"))
+
+    # 1. Check dynamic range in edited region (must not be completely black, white, or uniform noise)
+    edited_pixels = arr[mask_arr > 10]
+    if len(edited_pixels) > 0:
+        std_val = float(np.std(edited_pixels))
+        min_val = float(np.min(edited_pixels))
+        max_val = float(np.max(edited_pixels))
+        if std_val < 8.0:
+            raise RuntimeError(f"Face shape refinement produced an unnatural flat or uniform region (std={std_val:.1f}).")
+        if min_val > 225.0 or max_val < 25.0:
+            raise RuntimeError(f"Face shape refinement produced an unshaded or clipped result (range [{min_val:.0f}, {max_val:.0f}]).")
+
+    # 2. Check facial symmetry in the jawline area
+    left_jaw = arr[int(h * 0.55):int(h * 0.85), int(w * 0.15):int(w * 0.35)]
+    right_jaw = arr[int(h * 0.55):int(h * 0.85), int(w * 0.65):int(w * 0.85)]
+    right_jaw_flipped = np.fliplr(right_jaw)
+    sym_diff = float(np.mean(np.abs(left_jaw - right_jaw_flipped)))
+    if sym_diff > 85.0:
+        raise RuntimeError(f"Face shape refinement produced an asymmetrical or distorted jawline (symmetry delta={sym_diff:.1f}).")
+
+    # 3. Check internal facial feature preservation (eyes, nose, mouth must be identical)
+    mouth_diff = float(np.max(np.abs(arr[int(h * 0.64):int(h * 0.76), int(w * 0.28):int(w * 0.72)] - 
+                                     orig_arr[int(h * 0.64):int(h * 0.76), int(w * 0.28):int(w * 0.72)])))
+    nose_diff = float(np.max(np.abs(arr[int(h * 0.42):int(h * 0.62), int(w * 0.32):int(w * 0.68)] - 
+                                    orig_arr[int(h * 0.42):int(h * 0.62), int(w * 0.32):int(w * 0.68)])))
+    if mouth_diff > 1.0 or nose_diff > 1.0:
+        raise RuntimeError(f"Face shape refinement violated facial identity protection (mouth delta={mouth_diff:.1f}, nose delta={nose_diff:.1f}).")
+
 @app.post("/api/refine-feature", response_model=RefinementResponse)
 async def refine_feature(
     image: str = Form(...),
@@ -300,6 +376,37 @@ async def refine_feature(
             mask_blur_val = 3
             model_type_val = "cloudflare"
 
+        # Branch H: Surgical Face Shape Refinement
+        elif (
+            any(k in feature_lower for k in ["faceshape", "face_shape", "face shape", "jaw", "jawline", "chin"]) or
+            any(k in lower_prompt for k in ["face shape", "face-shape", "oval", "round", "square", "rectangle", "heart", "diamond", "oblong", "long-face", "long face"])
+        ):
+            print(f">>> ACTIVATING SURGICAL FACE SHAPE REFINEMENT PIPELINE <<<")
+            if "square" in lower_prompt:
+                shape_key = "square"
+            elif "rectangle" in lower_prompt or "rectangular" in lower_prompt:
+                shape_key = "rectangle"
+            elif "round" in lower_prompt:
+                shape_key = "round"
+            elif "heart" in lower_prompt:
+                shape_key = "heart"
+            elif "diamond" in lower_prompt:
+                shape_key = "diamond"
+            elif "oblong" in lower_prompt or "long" in lower_prompt:
+                shape_key = "oblong"
+            else:
+                shape_key = "oval"
+
+            shape_info = FACE_SHAPE_PROMPTS.get(shape_key, FACE_SHAPE_PROMPTS["oval"])
+            actual_prompt = shape_info["prompt"]
+            negative_prompt = shape_info["negative"]
+            # Tuned AI generation parameters specifically for controlled face shape transformations
+            strength_val = 0.70
+            guidance_scale_val = 7.5
+            steps_val = 20
+            mask_blur_val = 3
+            model_type_val = "cloudflare"
+
         # Branch G: General Refinement (jaw, chin, cheekbones, etc.)
         else:
             print(f"Standard surgical refinement pipeline for {feature_name}")
@@ -310,6 +417,11 @@ async def refine_feature(
             steps_val = 20
             mask_blur_val = 3
             model_type_val = "cloudflare"
+
+        is_face_shape_refinement = (
+            any(k in feature_lower for k in ["faceshape", "face_shape", "face shape", "jaw", "jawline", "chin"]) or
+            any(k in lower_prompt for k in ["face shape", "face-shape", "oval", "round", "square", "rectangle", "heart", "diamond", "oblong", "long-face", "long face"])
+        ) and not any(k in feature_lower for k in ["hair", "nose", "eye", "lip", "mouth", "age", "beard"])
 
         try:
             result_image = surgeon.inpaint(  # pyre-ignore[16]
@@ -324,6 +436,15 @@ async def refine_feature(
                 model_type=model_type_val,
                 seed=seed
             )
+
+            # Validate face shape output before accepting
+            if is_face_shape_refinement:
+                try:
+                    validate_face_shape_result(original_image, result_image, processed_mask)
+                    print(f"[Refine] Face shape validation passed successfully.")
+                except RuntimeError as ve:
+                    print(f"[Refine] Face shape validation failed: {ve}")
+                    raise HTTPException(status_code=502, detail=str(ve))
         except RuntimeError as re:
             print(f"[Refine] AI Service error: {re}")
             raise HTTPException(status_code=502, detail=str(re))

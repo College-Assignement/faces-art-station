@@ -82,7 +82,7 @@ function inferFeatureFromPrompt(prompt: string): FeatureCategory {
   }
 
   // Face shape/jaw
-  if (/\b(jaw|jawline|chin|face\s*shape|cheek|cheekbone|oval|round|square|angular)\b/.test(lowerPrompt)) {
+  if (/\b(jaw|jawline|chin|face\s*shape|cheek|cheekbone|oval|round|square|rectangle|heart|diamond|oblong|angular)\b/.test(lowerPrompt)) {
     return 'faceShape';
   }
 
@@ -111,7 +111,7 @@ function mapCategoryToMaskName(category: FeatureCategory | 'inferred', prompt: s
     'nose': 'nose',
     'lips': 'mouth',
     'facialHair': 'beard',
-    'faceShape': 'jaw',
+    'faceShape': 'faceshape',
     'jawline': 'jaw',
     'cheekbones': 'face',
     'ears': 'face',
