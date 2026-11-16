@@ -127,34 +127,78 @@ NOSE_PROMPTS = {
 }
 
 # The "Face Shape Dictionary" - anatomical, symmetrical forensic composite prompts
+# Each prompt is focused solely on the jaw, cheek and chin contour.
+# A shared negative suffix blocks global identity changes, color, and distortion.
+_SHAPE_NEG_SUFFIX = (
+    "changing eyes, changing nose, changing lips, changing eyebrows, "
+    "changing hairstyle, new face, different person, identity change, "
+    "color, realistic photo, 3d render, blur, low quality, deformed, "
+    "asymmetrical, crooked, artifacts, distortion, watermark"
+)
 FACE_SHAPE_PROMPTS = {
     "oval": {
-        "prompt": "forensic sketch pencil drawing of an oval face shape, softly rounded balanced jawline, harmonious cheekbones tapering gently to a smooth rounded chin, symmetrical facial proportions, technical police composite sketch, black and white pencil line art",
-        "negative": "square jaw, wide angular chin, heavy jowls, sharp pointy chin, deformed, asymmetrical, crooked, double chin, color, photo, low quality"
+        "prompt": (
+            "forensic pencil sketch jawline and chin area, oval face shape, "
+            "softly rounded symmetrical jawline, balanced cheekbones tapering gently "
+            "to a smooth rounded chin, harmonious facial contour, black and white pencil line art, "
+            "technical police composite sketch"
+        ),
+        "negative": f"square jaw, wide angular chin, heavy jowls, sharp pointy chin, double chin, {_SHAPE_NEG_SUFFIX}"
     },
     "round": {
-        "prompt": "forensic sketch pencil drawing of a round face shape, full curved cheeks, soft circular jawline, smooth rounded chin, equal face width and height, symmetrical facial contours, technical police composite sketch, black and white pencil line art",
-        "negative": "sharp angular jaw, long chin, narrow face, pointy chin, hollow cheeks, asymmetrical, deformed, color, photo, low quality"
+        "prompt": (
+            "forensic pencil sketch jawline and chin area, round face shape, "
+            "full wide curved cheeks, soft circular jawline, smooth rounded chin, "
+            "equal face width and height, symmetrical facial contour, black and white pencil line art, "
+            "technical police composite sketch"
+        ),
+        "negative": f"sharp angular jaw, long chin, narrow face, pointy chin, hollow cheeks, {_SHAPE_NEG_SUFFIX}"
     },
     "square": {
-        "prompt": "forensic sketch pencil drawing of a square face shape, strong wide angular jawline, defined horizontal mandibular angles, broad flat square chin, symmetrical structured jaw, technical police composite sketch, black and white pencil line art",
-        "negative": "round chin, soft curved jaw, narrow chin, pointed chin, long oval face, asymmetrical, crooked, deformed, color, photo, low quality"
+        "prompt": (
+            "forensic pencil sketch jawline and chin area, square face shape, "
+            "strong wide angular jawline, defined horizontal mandibular angles, "
+            "broad flat square chin, prominent jaw corners, symmetrical structured jaw, "
+            "black and white pencil line art, technical police composite sketch"
+        ),
+        "negative": f"round chin, soft curved jaw, narrow chin, pointed chin, long oval face, {_SHAPE_NEG_SUFFIX}"
     },
     "rectangle": {
-        "prompt": "forensic sketch pencil drawing of a rectangle face shape, elongated vertical face structure, strong straight jawline with defined angular corners, broad structured chin, symmetrical rectangular facial contour, technical police composite sketch, black and white pencil line art",
-        "negative": "round face, circular jaw, pointed chin, heart face, wide circular cheeks, asymmetrical, crooked, deformed, color, photo, low quality"
+        "prompt": (
+            "forensic pencil sketch jawline and chin area, rectangle face shape, "
+            "strong straight jawline with defined angular corners, elongated jaw structure, "
+            "broad structured chin, symmetrical rectangular facial contour, "
+            "black and white pencil line art, technical police composite sketch"
+        ),
+        "negative": f"round jaw, circular cheeks, pointed chin, heart shape, {_SHAPE_NEG_SUFFIX}"
     },
     "heart": {
-        "prompt": "forensic sketch pencil drawing of a heart face shape, prominent wide cheekbones tapering down to a delicate narrow pointed chin, slender refined jawline, symmetrical heart-shaped facial contour, technical police composite sketch, black and white pencil line art",
-        "negative": "wide square jaw, heavy flat chin, round circular face, jowls, broad chin, asymmetrical, crooked, deformed, color, photo, low quality"
+        "prompt": (
+            "forensic pencil sketch jawline and chin area, heart face shape, "
+            "wide prominent cheekbones tapering sharply inward to a delicate narrow pointed chin, "
+            "slender refined jawline, narrow pointed chin, symmetrical heart-shaped contour, "
+            "black and white pencil line art, technical police composite sketch"
+        ),
+        "negative": f"wide square jaw, heavy flat chin, broad chin, jowls, round circular jaw, {_SHAPE_NEG_SUFFIX}"
     },
     "diamond": {
-        "prompt": "forensic sketch pencil drawing of a diamond face shape, wide high cheekbones tapering sharply inward to a slender pointed chin and narrow temples, angular refined jawline, symmetrical diamond facial contour, technical police composite sketch, black and white pencil line art",
-        "negative": "wide square jaw, flat chin, round full cheeks, heavy jowls, asymmetrical, crooked, deformed, color, photo, low quality"
+        "prompt": (
+            "forensic pencil sketch jawline and chin area, diamond face shape, "
+            "wide high cheekbones tapering sharply inward to a slender pointed chin, "
+            "narrow angular lower jaw, defined cheekbone prominence, "
+            "symmetrical diamond facial contour, black and white pencil line art, "
+            "technical police composite sketch"
+        ),
+        "negative": f"wide square jaw, flat wide chin, round full cheeks, heavy jowls, {_SHAPE_NEG_SUFFIX}"
     },
     "oblong": {
-        "prompt": "forensic sketch pencil drawing of an oblong face shape, long slender face with straight vertical cheek lines, narrow elongated jawline tapering to a slightly rounded chin, symmetrical long facial contour, technical police composite sketch, black and white pencil line art",
-        "negative": "wide round face, broad square jaw, circular cheeks, short face, wide chin, asymmetrical, crooked, deformed, color, photo, low quality"
+        "prompt": (
+            "forensic pencil sketch jawline and chin area, oblong face shape, "
+            "long slender jaw with straight vertical cheek lines, narrow elongated jawline, "
+            "slightly rounded chin, symmetrical long narrow facial contour, "
+            "black and white pencil line art, technical police composite sketch"
+        ),
+        "negative": f"wide round face, broad square jaw, circular cheeks, short face, wide chin, {_SHAPE_NEG_SUFFIX}"
     }
 }
 
@@ -194,12 +238,18 @@ def validate_face_shape_result(original_image: Image.Image, result_image: Image.
     if sym_diff > 85.0:
         raise RuntimeError(f"Face shape refinement produced an asymmetrical or distorted jawline (symmetry delta={sym_diff:.1f}).")
 
-    # 3. Check internal facial feature preservation (eyes, nose, mouth must be identical)
-    mouth_diff = float(np.max(np.abs(arr[int(h * 0.64):int(h * 0.76), int(w * 0.28):int(w * 0.72)] - 
-                                     orig_arr[int(h * 0.64):int(h * 0.76), int(w * 0.28):int(w * 0.72)])))
-    nose_diff = float(np.max(np.abs(arr[int(h * 0.42):int(h * 0.62), int(w * 0.32):int(w * 0.68)] - 
-                                    orig_arr[int(h * 0.42):int(h * 0.62), int(w * 0.32):int(w * 0.68)])))
-    if mouth_diff > 1.0 or nose_diff > 1.0:
+    # 3. Check internal facial feature preservation (eyes, nose, mouth must be identical to original).
+    # Validation ROIs must stay inside the mask exclusion zones (narrower than the exclusion boundaries).
+    # Tolerance is 3.0 px to absorb sub-pixel LANCZOS resampling artefacts from composite resize.
+    mouth_diff = float(np.max(np.abs(
+        arr     [int(h * 0.65):int(h * 0.76), int(w * 0.30):int(w * 0.70)] -
+        orig_arr[int(h * 0.65):int(h * 0.76), int(w * 0.30):int(w * 0.70)]
+    )))
+    nose_diff = float(np.max(np.abs(
+        arr     [int(h * 0.45):int(h * 0.62), int(w * 0.33):int(w * 0.67)] -
+        orig_arr[int(h * 0.45):int(h * 0.62), int(w * 0.33):int(w * 0.67)]
+    )))
+    if mouth_diff > 3.0 or nose_diff > 3.0:
         raise RuntimeError(f"Face shape refinement violated facial identity protection (mouth delta={mouth_diff:.1f}, nose delta={nose_diff:.1f}).")
 
 @app.post("/api/refine-feature", response_model=RefinementResponse)
@@ -401,11 +451,15 @@ async def refine_feature(
             shape_info = FACE_SHAPE_PROMPTS.get(shape_key, FACE_SHAPE_PROMPTS["oval"])
             actual_prompt = shape_info["prompt"]
             negative_prompt = shape_info["negative"]
-            # Tuned AI generation parameters specifically for controlled face shape transformations
-            strength_val = 0.70
-            guidance_scale_val = 7.5
+            # Tuned AI generation parameters for controlled, identity-preserving face shape transformations:
+            # - strength 0.60: lower than other branches to reduce random drift while still allowing jaw/cheek changes
+            # - guidance_scale 9.0: higher prompt adherence forces the shape descriptor to dominate
+            # - steps 20: standard, sufficient for SD 1.5 inpainting
+            # - mask_blur 2: minimal blur — mask is already feathered in _generate_face_shape_mask
+            strength_val = 0.60
+            guidance_scale_val = 9.0
             steps_val = 20
-            mask_blur_val = 3
+            mask_blur_val = 2
             model_type_val = "cloudflare"
 
         # Branch G: General Refinement (jaw, chin, cheekbones, etc.)

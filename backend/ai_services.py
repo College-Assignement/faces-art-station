@@ -267,6 +267,7 @@ class FaceIdentifier:
         """
         Dynamically generate a symmetrical, face-shape-specific anatomical mask.
         Covers cheeks, jawline contours, mandibular angles, and chin boundaries.
+        Wider cheek coverage gives the AI more area to work with for realistic shape changes.
         STRICTLY excludes and protects eyes, eyebrows, nose, lips/mouth, and forehead (100% untouched).
         """
         import numpy as np
@@ -291,80 +292,90 @@ class FaceIdentifier:
         else:
             shape_type = "oval"
 
-        # Anatomical contour specifications for each face shape
+        # Anatomical contour specifications for each face shape.
+        # cheek_outer_x: lateral edge of mask (smaller = wider coverage toward ear)
+        # cheek_inner_x: inner boundary of cheek column (larger = narrower, avoids nose)
+        # chin_half_width: half-width of the chin connector rectangle (larger = wider chin)
+        # jaw_corner_y: Y position of the mandibular angle (lower = taller jaw region)
+        # chin_y_max: lowest Y position of chin (larger = extends further down)
         if shape_type == "square":
-            # Strong, wide angular jaw corners, broad flat chin
-            jaw_outer_x = 0.14
-            cheek_outer_x = 0.15
-            cheek_inner_x = 0.30
-            chin_y_max = 0.92
-            chin_half_width = 0.22
-            jaw_corner_y = 0.78
+            # Wide angular jaw, broad flat chin, strong mandibular angles
+            cheek_outer_x  = 0.09   # wide lateral coverage
+            cheek_inner_x  = 0.32
+            chin_half_width= 0.23
+            jaw_corner_y   = 0.78
+            chin_y_max     = 0.93
+            cheek_top_y    = 0.46
         elif shape_type == "rectangle":
             # Elongated straight jaw, wide chin
-            jaw_outer_x = 0.15
-            cheek_outer_x = 0.16
-            cheek_inner_x = 0.30
-            chin_y_max = 0.95
-            chin_half_width = 0.20
-            jaw_corner_y = 0.80
+            cheek_outer_x  = 0.10
+            cheek_inner_x  = 0.32
+            chin_half_width= 0.21
+            jaw_corner_y   = 0.80
+            chin_y_max     = 0.96
+            cheek_top_y    = 0.46
         elif shape_type == "round":
-            # Full curved cheeks, soft curved jawline
-            jaw_outer_x = 0.15
-            cheek_outer_x = 0.14
-            cheek_inner_x = 0.31
-            chin_y_max = 0.90
-            chin_half_width = 0.19
-            jaw_corner_y = 0.75
+            # Full wide cheeks, soft circular jawline, smooth rounded chin
+            cheek_outer_x  = 0.08   # very wide for full cheeks
+            cheek_inner_x  = 0.33
+            chin_half_width= 0.20
+            jaw_corner_y   = 0.75
+            chin_y_max     = 0.91
+            cheek_top_y    = 0.46
         elif shape_type == "heart":
-            # Wider cheekbones, sharp inward taper, narrow pointed chin
-            jaw_outer_x = 0.18
-            cheek_outer_x = 0.14
-            cheek_inner_x = 0.30
-            chin_y_max = 0.93
-            chin_half_width = 0.13
-            jaw_corner_y = 0.72
+            # Prominent wide cheekbones tapering to narrow pointed chin
+            cheek_outer_x  = 0.09
+            cheek_inner_x  = 0.32
+            chin_half_width= 0.11   # narrow chin
+            jaw_corner_y   = 0.72
+            chin_y_max     = 0.94
+            cheek_top_y    = 0.46
         elif shape_type == "diamond":
-            # Widest at cheekbones, narrow temples, tapered chin
-            jaw_outer_x = 0.19
-            cheek_outer_x = 0.13
-            cheek_inner_x = 0.29
-            chin_y_max = 0.93
-            chin_half_width = 0.13
-            jaw_corner_y = 0.70
+            # Widest at mid-cheekbones, narrow temples and narrow chin
+            cheek_outer_x  = 0.09
+            cheek_inner_x  = 0.31
+            chin_half_width= 0.11   # narrow chin
+            jaw_corner_y   = 0.70
+            chin_y_max     = 0.94
+            cheek_top_y    = 0.46
         elif shape_type == "oblong":
-            # Narrow vertical sides, elongated chin
-            jaw_outer_x = 0.19
-            cheek_outer_x = 0.19
-            cheek_inner_x = 0.30
-            chin_y_max = 0.96
-            chin_half_width = 0.15
-            jaw_corner_y = 0.78
+            # Narrow elongated vertical sides, long narrow chin
+            cheek_outer_x  = 0.13   # narrower lateral extent
+            cheek_inner_x  = 0.31
+            chin_half_width= 0.14
+            jaw_corner_y   = 0.79
+            chin_y_max     = 0.97
+            cheek_top_y    = 0.46
         else:  # oval
-            # Harmonious balanced curves
-            jaw_outer_x = 0.17
-            cheek_outer_x = 0.16
-            cheek_inner_x = 0.30
-            chin_y_max = 0.92
-            chin_half_width = 0.17
-            jaw_corner_y = 0.76
+            # Harmonious balanced curves, slightly tapering chin
+            cheek_outer_x  = 0.10
+            cheek_inner_x  = 0.32
+            chin_half_width= 0.17
+            jaw_corner_y   = 0.76
+            chin_y_max     = 0.93
+            cheek_top_y    = 0.46
 
-        # Draw left cheek & jaw polygon
+        # -- Draw LEFT half only (will be mirrored to right for perfect symmetry) --
+
+        # Left lateral cheek & jaw polygon
+        jaw_outer_x = cheek_outer_x - 0.01  # jaw is slightly wider than cheek top
         left_poly = [
-            (int(w * cheek_outer_x), int(h * 0.44)),
-            (int(w * cheek_inner_x), int(h * 0.44)),
-            (int(w * cheek_inner_x), int(h * 0.77)),
-            (int(w * (0.50 - chin_half_width)), int(h * chin_y_max)),
-            (int(w * (0.50 - chin_half_width - 0.08)), int(h * chin_y_max)),
-            (int(w * (jaw_outer_x - 0.03)), int(h * jaw_corner_y)),
-            (int(w * cheek_outer_x), int(h * 0.44)),
+            (int(w * cheek_outer_x),              int(h * cheek_top_y)),          # top-outer
+            (int(w * cheek_inner_x),              int(h * cheek_top_y)),          # top-inner
+            (int(w * cheek_inner_x),              int(h * 0.78)),                 # mid-inner
+            (int(w * (0.50 - chin_half_width)),   int(h * chin_y_max)),           # chin inner-left
+            (int(w * (0.50 - chin_half_width - 0.06)), int(h * chin_y_max)),      # chin outer-left
+            (int(w * max(jaw_outer_x, 0.05)),     int(h * jaw_corner_y)),         # mandibular angle
+            (int(w * cheek_outer_x),              int(h * cheek_top_y)),          # close polygon
         ]
         draw.polygon(left_poly, fill=255)
 
-        # Center chin connector below lips
+        # Center chin connector below lips — starts well below the mouth protection zone
+        # chin_top_y must be low enough that GaussianBlur(4) cannot bleed upward into mouth ROI (y<0.77h)
+        chin_top_y = 0.82
         draw.rectangle([
-            int(w * (0.50 - chin_half_width)), int(h * 0.78),
-            int(w * (0.50 + chin_half_width)), int(h * chin_y_max)
+            int(w * (0.50 - chin_half_width)),  int(h * chin_top_y),
+            int(w * (0.50 + chin_half_width)),  int(h * chin_y_max)
         ], fill=255)
 
         # Mirror left half to right half for 100% PERFECT MATHEMATICAL SYMMETRY
@@ -372,32 +383,45 @@ class FaceIdentifier:
         m_arr[:, int(w / 2):] = np.fliplr(m_arr[:, :int(w / 2)])
 
         # STRICT SURGICAL PROTECTIONS - ZERO TOLERANCE FACIAL PRESERVATION:
-        # 1. Eyes and Eyebrows (100% protected)
-        m_arr[:int(h * 0.48), int(w * 0.18):int(w * 0.82)] = 0
-        # 2. Nose and Bridge (100% protected)
-        m_arr[int(h * 0.38):int(h * 0.64), int(w * 0.30):int(w * 0.70)] = 0
-        # 3. Lips and Mouth (100% protected)
-        m_arr[int(h * 0.62):int(h * 0.77), int(w * 0.25):int(w * 0.75)] = 0
-        # 4. Philtrum (100% protected)
-        m_arr[int(h * 0.58):int(h * 0.65), int(w * 0.32):int(w * 0.68)] = 0
-        # 5. Forehead center and hair (100% protected)
-        m_arr[:int(h * 0.38), :] = 0
+        # Applied AFTER mirroring so they are always perfectly symmetrical.
+        # 1. Full upper face — eyes, eyebrows, forehead, hairline (100% protected)
+        m_arr[:int(h * 0.48), :] = 0
+        # 2. Nose column and bridge (100% protected)
+        m_arr[int(h * 0.44):int(h * 0.65), int(w * 0.28):int(w * 0.72)] = 0
+        # 3. Lips and Mouth (100% protected) — matches test ROI [0.62h:0.77h, 0.25w:0.75w] with margin
+        m_arr[int(h * 0.62):int(h * 0.78), int(w * 0.24):int(w * 0.76)] = 0
+        # 4. Philtrum — narrow strip between nose bottom and upper lip (100% protected)
+        m_arr[int(h * 0.59):int(h * 0.66), int(w * 0.31):int(w * 0.69)] = 0
 
-        # Apply soft internal feathering so boundary transition into skin is smooth and natural
-        feathered = Image.fromarray(m_arr).filter(ImageFilter.GaussianBlur(3))
+        # Apply soft Gaussian feathering for natural mask edges (blur AFTER all protections)
+        feathered = Image.fromarray(m_arr).filter(ImageFilter.GaussianBlur(4))
         f_arr = np.array(feathered)
-        # Re-enforce zero-bleed core so no blurred pixels penetrate the protected facial zones
-        f_arr[:int(h * 0.48), int(w * 0.18):int(w * 0.82)] = 0
-        f_arr[int(h * 0.38):int(h * 0.64), int(w * 0.30):int(w * 0.70)] = 0
-        f_arr[int(h * 0.62):int(h * 0.77), int(w * 0.25):int(w * 0.75)] = 0
-        f_arr[int(h * 0.58):int(h * 0.65), int(w * 0.32):int(w * 0.68)] = 0
-        f_arr[:int(h * 0.38), :] = 0
+
+        # Re-enforce all zero-bleed protection zones after blur — must match or be tighter than test ROIs
+        f_arr[:int(h * 0.48), :] = 0
+        f_arr[int(h * 0.44):int(h * 0.65), int(w * 0.28):int(w * 0.72)] = 0
+        f_arr[int(h * 0.62):int(h * 0.78), int(w * 0.24):int(w * 0.76)] = 0
+        f_arr[int(h * 0.59):int(h * 0.66), int(w * 0.31):int(w * 0.69)] = 0
         f_arr[f_arr < 4] = 0
 
-        # Re-enforce exact symmetry on the feathered mask
-        f_arr[:, int(w / 2):] = np.fliplr(f_arr[:, :int(w / 2)])
+        # Final symmetry pass on feathered mask
+        f_arr[:, int(w // 2):] = np.fliplr(f_arr[:, :int(w // 2)])
+
+        # Diagnostic: measure actual coverage and boundary metrics
+        total_px = f_arr.size
+        covered_px = int(np.sum(f_arr > 10))
+        coverage_pct = round(covered_px / total_px * 100, 1)
+        # Verify zero bleed into protected zones
+        eyes_bleed   = int(np.sum(f_arr[:int(h * 0.48), :] > 0))
+        nose_bleed   = int(np.sum(f_arr[int(h * 0.44):int(h * 0.65), int(w * 0.28):int(w * 0.72)] > 0))
+        mouth_bleed  = int(np.sum(f_arr[int(h * 0.63):int(h * 0.78), int(w * 0.24):int(w * 0.76)] > 0))
+        # Symmetry check
+        left_half  = f_arr[:, :int(w // 2)].astype(int)
+        right_half = np.fliplr(f_arr[:, int(w // 2):]).astype(int)
+        sym_error  = int(np.sum(np.abs(left_half - right_half)))
 
         print(f"Enforced surgical boundary on dynamic FACE SHAPE mask for '{shape_type}' (symmetry: 100%, eyes/nose/lips protected)")
+        print(f"[Mask] Coverage: {coverage_pct}% | Symmetry Error: {sym_error} | Eyes: {eyes_bleed} | Nose: {nose_bleed} | Mouth: {mouth_bleed}")
         return Image.fromarray(f_arr)
 
     def _generate_fallback_mask(self, image: Image.Image, feature_name: str) -> Image.Image:
@@ -494,14 +518,17 @@ class FaceIdentifier:
                 m_arr[int(h * 0.64):int(h * 0.88), int(w * 0.30):int(w * 0.70)] = 0  # Mouth
                 m_arr[int(h * 0.80):, int(w * 0.38):int(w * 0.62)] = 0               # Neck center
             elif is_shape:
-                # Surgical protection: Eyes, eyebrows, nose, mouth 100% protected from face shape edits
-                m_arr[:int(h * 0.48), int(w * 0.18):int(w * 0.82)] = 0   # Eyes and eyebrows
-                m_arr[int(h * 0.38):int(h * 0.64), int(w * 0.30):int(w * 0.70)] = 0   # Nose
-                m_arr[int(h * 0.62):int(h * 0.77), int(w * 0.25):int(w * 0.75)] = 0   # Lips / Mouth
-                m_arr[int(h * 0.58):int(h * 0.65), int(w * 0.32):int(w * 0.68)] = 0   # Philtrum
-                m_arr[:int(h * 0.38), :] = 0                                            # Forehead & hair
+                # Surgical protection: match the exact same zones as _generate_face_shape_mask
+                # Full upper face — eyes, eyebrows, forehead, hairline (100% protected)
+                m_arr[:int(h * 0.48), :] = 0
+                # Nose column and bridge (100% protected)
+                m_arr[int(h * 0.44):int(h * 0.65), int(w * 0.28):int(w * 0.72)] = 0
+                # Lips and Mouth (100% protected)
+                m_arr[int(h * 0.63):int(h * 0.78), int(w * 0.24):int(w * 0.76)] = 0
+                # Philtrum (100% protected)
+                m_arr[int(h * 0.59):int(h * 0.66), int(w * 0.31):int(w * 0.69)] = 0
                 # Enforce exact symmetry
-                m_arr[:, int(w / 2):] = np.fliplr(m_arr[:, :int(w / 2)])
+                m_arr[:, int(w // 2):] = np.fliplr(m_arr[:, :int(w // 2)])
 
         return Image.fromarray(m_arr)
 

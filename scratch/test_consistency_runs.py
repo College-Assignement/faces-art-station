@@ -46,3 +46,4 @@ for shape, prompt, seed in test_cases:
     print(f"Shape: {shape:8s} | Seed: {seed:3d} | Sim: {sim:.4f} | Mouth Diff: {m_diff:.2f} | Nose Diff: {n_diff:.2f} | Eyes Diff: {e_diff:.2f} | Status: PASS")
 
 print("All multi-run consistency tests passed successfully!")
+
