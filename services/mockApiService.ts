@@ -230,6 +230,15 @@ export const mockApiService = {
       const maskFeatureName = mapCategoryToMaskName(featureToChange, refinementPrompt);
       console.log(`Mapped feature category '${featureToChange}' to mask: '${maskFeatureName}'`);
 
+      // If refining hairstyle, cleanly strip previous hair descriptions so prompt doesn't accumulate conflicting tokens
+      if (featureToChange === 'hairStyle' || maskFeatureName === 'hair') {
+        const hairRegex = /\b(thick\s+|voluminous\s+|neat\s+)?(curly|wavy|straight|short|long|buzz\s?cut|afro|ponytail|bald|shaved|styled)\s+(hair|hairstyle|head|scalp)?\b/gi;
+        updatedPrompt = updatedPrompt.replace(hairRegex, '').replace(/,\s*,/g, ',').replace(/^,\s*/, '').replace(/,\s*$/, '');
+        if (!updatedPrompt.toLowerCase().includes(lowerRefinement)) {
+          updatedPrompt = `${updatedPrompt}, ${refinementPrompt}`;
+        }
+      }
+
       // Step 4: Create FormData to send to Python backend
       const formData = new FormData();
       formData.append('image', base64Image);

@@ -252,6 +252,171 @@ def validate_face_shape_result(original_image: Image.Image, result_image: Image.
     if mouth_diff > 3.0 or nose_diff > 3.0:
         raise RuntimeError(f"Face shape refinement violated facial identity protection (mouth delta={mouth_diff:.1f}, nose delta={nose_diff:.1f}).")
 
+# The "Hairstyle Dictionary" - anatomical forensic composite prompts and parameters
+_HAIR_NEG_SUFFIX = (
+    "changing eyes, changing nose, changing lips, changing eyebrows, "
+    "changing jawline, new face, different person, identity change, "
+    "color, realistic photo, 3d render, blur, low quality, deformed, "
+    "artifacts, distortion, watermark"
+)
+
+HAIR_STYLE_PROMPTS = {
+    "bald": {
+        "prompt": (
+            "forensic sketch of bald man, hairless, bare scalp, smooth skin texture, "
+            "bald head, hairless cranium, technical police composite sketch, "
+            "black and white pencil line art"
+        ),
+        "negative": f"hair, dark hair, curly, bangs, hairline, wig, dreadlocks, afro, stubble, ponytail, {_HAIR_NEG_SUFFIX}",
+        "strength": 1.0,
+        "guidance": 8.0
+    },
+    "buzzcut": {
+        "prompt": (
+            "forensic sketch of military buzzcut hairstyle, very short closely cropped hair, "
+            "defined clean buzzcut hairline, neat shaved sides, technical police composite sketch, "
+            "black and white pencil line art"
+        ),
+        "negative": f"long hair, bangs, curls, afro, wavy, ponytail, bald, {_HAIR_NEG_SUFFIX}",
+        "strength": 0.90,
+        "guidance": 8.0
+    },
+    "short": {
+        "prompt": (
+            "forensic sketch of short neat hair, trimmed clean cropped hairstyle, "
+            "short tapered sides, neat natural hairline, detailed hair strands, "
+            "technical police composite sketch, black and white pencil line art"
+        ),
+        "negative": f"long hair, curls, afro, wavy, bald, ponytail, shaggy, {_HAIR_NEG_SUFFIX}",
+        "strength": 0.90,
+        "guidance": 8.0
+    },
+    "long": {
+        "prompt": (
+            "forensic sketch of long straight hair flowing down past the shoulders, "
+            "detailed straight hair strands framing face and neck, natural hair volume, "
+            "technical police composite sketch, black and white pencil line art"
+        ),
+        "negative": f"short hair, bald, buzzcut, crop, afro, curls, {_HAIR_NEG_SUFFIX}",
+        "strength": 0.90,
+        "guidance": 8.0
+    },
+    "curly": {
+        "prompt": (
+            "forensic sketch of curly hair, defined tight curls, textured voluminous curls, "
+            "natural ringlets, dense curl pattern, technical police composite sketch, "
+            "black and white pencil line art"
+        ),
+        "negative": f"straight hair, flat hair, bald, sleek hair, buzzcut, {_HAIR_NEG_SUFFIX}",
+        "strength": 0.90,
+        "guidance": 8.0
+    },
+    "afro": {
+        "prompt": (
+            "forensic sketch of a full afro hairstyle, rounded voluminous afro hair, "
+            "dense textured kinky hair, natural afro silhouette, technical police composite sketch, "
+            "black and white pencil line art"
+        ),
+        "negative": f"straight hair, flat hair, bald, long straight hair, buzzcut, {_HAIR_NEG_SUFFIX}",
+        "strength": 0.90,
+        "guidance": 8.0
+    },
+    "wavy": {
+        "prompt": (
+            "forensic sketch of medium-length wavy hair, natural soft flowing waves, "
+            "textured wave hair strands, gentle curves, technical police composite sketch, "
+            "black and white pencil line art"
+        ),
+        "negative": f"bald, straight, shaved, buzzcut, tight afro, pin straight, {_HAIR_NEG_SUFFIX}",
+        "strength": 0.90,
+        "guidance": 8.0
+    },
+    "straight": {
+        "prompt": (
+            "forensic sketch of sleek straight hair, smooth flat straight hair strands, "
+            "combed neat straight hairstyle, fine hair lines, technical police composite sketch, "
+            "black and white pencil line art"
+        ),
+        "negative": f"curly, curls, afro, wavy, frizzy, permed, bald, {_HAIR_NEG_SUFFIX}",
+        "strength": 0.90,
+        "guidance": 8.0
+    },
+    "side_part": {
+        "prompt": (
+            "forensic sketch of side-parted hairstyle, neat combed hair with a defined clean side part line, "
+            "parted hair combed to the side, technical police composite sketch, "
+            "black and white pencil line art"
+        ),
+        "negative": f"bald, shaved, messy, afro, frizzy, shaggy, uncombed, {_HAIR_NEG_SUFFIX}",
+        "strength": 0.90,
+        "guidance": 8.0
+    },
+    "messy": {
+        "prompt": (
+            "forensic sketch of messy textured hair, tousled casual hair strands, "
+            "casual disheveled textured hairstyle, spiked natural hair, technical police composite sketch, "
+            "black and white pencil line art"
+        ),
+        "negative": f"bald, flat, combed, neat, formal, straight, {_HAIR_NEG_SUFFIX}",
+        "strength": 0.90,
+        "guidance": 8.0
+    },
+    "ponytail": {
+        "prompt": (
+            "forensic sketch of hair pulled back into a ponytail, sleek swept-back hairline, "
+            "gathered hair tied at the back, technical police composite sketch, "
+            "black and white pencil line art"
+        ),
+        "negative": f"afro, buzzcut, bald, messy bangs, {_HAIR_NEG_SUFFIX}",
+        "strength": 0.90,
+        "guidance": 8.0
+    }
+}
+
+def validate_hair_result(original_image: Image.Image, result_image: Image.Image, mask: Image.Image) -> None:
+    """
+    Validate quality and biometric identity preservation of the refined hairstyle.
+    Raises RuntimeError if output is malformed, distorted, or corrupted.
+    """
+    import numpy as np
+    if result_image is None:
+        raise RuntimeError("Hair refinement failed: empty image returned.")
+
+    w, h = result_image.size
+    if (w, h) != original_image.size:
+        raise RuntimeError(f"Hair refinement error: dimension mismatch ({w}x{h} vs {original_image.size}).")
+
+    arr = np.array(result_image.convert("L"), dtype=float)
+    orig_arr = np.array(original_image.convert("L"), dtype=float)
+    mask_arr = np.array(mask.convert("L"))
+
+    # 1. Check dynamic range in edited hair region
+    edited_pixels = arr[mask_arr > 10]
+    if len(edited_pixels) > 0:
+        std_val = float(np.std(edited_pixels))
+        if std_val < 5.0:
+            raise RuntimeError(f"Hair refinement produced an unnatural flat or uniform region (std={std_val:.1f}).")
+
+    # 2. Check internal facial feature preservation (eyes, nose, mouth must remain identical)
+    eyes_diff = float(np.max(np.abs(
+        arr     [int(h * 0.37):int(h * 0.47), int(w * 0.22):int(w * 0.78)] -
+        orig_arr[int(h * 0.37):int(h * 0.47), int(w * 0.22):int(w * 0.78)]
+    )))
+    nose_diff = float(np.max(np.abs(
+        arr     [int(h * 0.46):int(h * 0.62), int(w * 0.32):int(w * 0.68)] -
+        orig_arr[int(h * 0.46):int(h * 0.62), int(w * 0.32):int(w * 0.68)]
+    )))
+    mouth_diff = float(np.max(np.abs(
+        arr     [int(h * 0.65):int(h * 0.76), int(w * 0.28):int(w * 0.72)] -
+        orig_arr[int(h * 0.65):int(h * 0.76), int(w * 0.28):int(w * 0.72)]
+    )))
+
+    if eyes_diff > 3.0 or nose_diff > 3.0 or mouth_diff > 3.0:
+        raise RuntimeError(
+            f"Hair refinement violated facial identity protection "
+            f"(eyes delta={eyes_diff:.1f}, nose delta={nose_diff:.1f}, mouth delta={mouth_diff:.1f})."
+        )
+
 @app.post("/api/refine-feature", response_model=RefinementResponse)
 async def refine_feature(
     image: str = Form(...),
@@ -315,8 +480,8 @@ async def refine_feature(
             mask_blur_val = 3
             model_type_val = "cloudflare"
 
-        # Branch B: Removal (Beards, glasses, etc.)
-        elif any(k in lower_prompt for k in ["remove", "without", "no ", "delete", "gone", "clean-shaven", "bare face"]):
+        # Branch B: Removal (Beards, glasses, etc. - excluding hair styles)
+        elif any(k in lower_prompt for k in ["remove", "without", "delete", "gone", "bare face"]) and feature_lower not in ["hair", "hairstyle", "hairStyle"]:
             print(f"Detected REMOVAL intent for: {feature_name}")
             actual_prompt = f"smooth clean skin texture, bare skin, clean face, detailed forensic sketch, black and white pencil shading"
             negative_prompt = f"beard, mustache, moustache, stubble, facial hair, {feature_name}, distortion, unnatural, color"
@@ -330,40 +495,39 @@ async def refine_feature(
         elif feature_lower in ["hair", "hairstyle", "hairStyle"] or "hair" in lower_prompt:
             print(f">>> ACTIVATING SURGICAL HAIR REFINEMENT PIPELINE <<<")
             
-            is_long = any(k in lower_prompt for k in ["long", "shoulder", "past shoulders", "chest", "lengthy", "extensions", "ponytail", "flowing", "braid", "dread"])
-            is_curly = any(k in lower_prompt for k in ["curly", "curls", "afro", "wavy", "frizzy", "kinky", "volume", "voluminous", "permed", "ringlets", "coily"])
-            is_bald = any(k in lower_prompt for k in ["bald", "shaved", "buzz", "buzzcut", "clean shaven head", "no hair", "bare head", "bald head", "shaved head", "fade"])
-            is_straight = any(k in lower_prompt for k in ["straight", "sleek", "flat", "smooth"])
-            is_light = any(k in lower_prompt for k in ["light", "blonde", "blond", "grey", "gray", "white", "silver", "highlights"])
-
-            if is_bald:
-                actual_prompt = "forensic sketch pencil drawing of a completely bald head, clean-shaven bald scalp, no hair, smooth bald head, technical police composite sketch, black and white line art"
-                negative_prompt = "hair, long hair, bangs, curls, wavy hair, afro, ponytail, wig, facial hair, deformed, color, photo, low quality"
-                strength_val = 0.85
-            elif is_long:
-                actual_prompt = "forensic sketch pencil drawing of long hair, long straight hair flowing down past the shoulders, detailed hair strands, technical police composite sketch, black and white line art"
-                negative_prompt = "short hair, bald, buzzcut, crop, fade, deformed, color, photo, low quality"
-                strength_val = 0.82
-            elif is_curly:
-                actual_prompt = "forensic sketch pencil drawing of curly hair, defined tight curls, voluminous textured curls, natural ringlets, technical police composite sketch, black and white line art"
-                negative_prompt = "straight hair, flat hair, bald, sleek hair, deformed, color, photo, low quality"
-                strength_val = 0.82
-            elif is_straight:
-                actual_prompt = "forensic sketch pencil drawing of sleek straight hair, smooth straight hair strands, neat flat straight hairstyle, technical police composite sketch, black and white line art"
-                negative_prompt = "curly, wavy, afro, curls, frizzy, permed, bald, deformed, color, photo, low quality"
-                strength_val = 0.82
-            elif is_light:
-                actual_prompt = "forensic sketch pencil drawing of light blonde hair, light-colored hair, white highlights, soft fine pencil linework, bright hair tone, technical police composite sketch, black and white line art"
-                negative_prompt = "dark hair, black hair, heavy black shading, dense dark ink, deformed, color, photo, low quality"
-                strength_val = 0.85
+            # Select target hairstyle from HAIR_STYLE_PROMPTS
+            if any(k in lower_prompt for k in ["bald", "clean-shaven head", "clean shaven head", "no hair", "bare head", "shaved head", "shaved scalp", "hairless"]):
+                style_key = "bald"
+            elif any(k in lower_prompt for k in ["buzz", "buzzcut", "buzz cut", "crew cut"]):
+                style_key = "buzzcut"
+            elif any(k in lower_prompt for k in ["ponytail", "pony tail", "tied back"]):
+                style_key = "ponytail"
+            elif any(k in lower_prompt for k in ["long", "past shoulders", "shoulder length", "flowing"]):
+                style_key = "long"
+            elif any(k in lower_prompt for k in ["afro"]):
+                style_key = "afro"
+            elif any(k in lower_prompt for k in ["curly", "curls", "kinky", "permed", "ringlets", "coily"]):
+                style_key = "curly"
+            elif any(k in lower_prompt for k in ["wavy", "waves"]):
+                style_key = "wavy"
+            elif any(k in lower_prompt for k in ["straight", "sleek", "flat hair", "smooth"]):
+                style_key = "straight"
+            elif any(k in lower_prompt for k in ["side-part", "side part", "parted", "comb over"]):
+                style_key = "side_part"
+            elif any(k in lower_prompt for k in ["messy", "tousled", "spiky", "spiked", "shaggy"]):
+                style_key = "messy"
+            elif any(k in lower_prompt for k in ["short", "crop", "cropped", "neat", "trimmed"]):
+                style_key = "short"
             else:
-                actual_prompt = f"forensic sketch pencil drawing of hairstyle: {refinement_prompt}, detailed hair strands, technical police composite sketch, black and white line art"
-                negative_prompt = "deformed, blurry, color, realistic photo, low quality"
-                strength_val = 0.82
+                style_key = "short"
 
-            guidance_scale_val = 7.5
+            style_info = HAIR_STYLE_PROMPTS.get(style_key, HAIR_STYLE_PROMPTS["short"])
+            actual_prompt = style_info["prompt"]
+            negative_prompt = style_info["negative"]
+            strength_val = style_info["strength"]
+            guidance_scale_val = style_info["guidance"]
             steps_val = 20
-            mask_blur_val = 3
+            mask_blur_val = 2
             model_type_val = "cloudflare"
             
         # Branch D: Surgical Eye Refinement
@@ -478,6 +642,10 @@ async def refine_feature(
             any(k in lower_prompt for k in ["face shape", "face-shape", "oval", "round", "square", "rectangle", "heart", "diamond", "oblong", "long-face", "long face"])
         ) and not any(k in feature_lower for k in ["hair", "nose", "eye", "lip", "mouth", "age", "beard"])
 
+        is_hair_refinement = (
+            feature_lower in ["hair", "hairstyle", "hairStyle"] or "hair" in lower_prompt
+        ) and not any(k in feature_lower for k in ["nose", "eye", "lip", "mouth", "age", "beard", "faceshape"])
+
         try:
             result_image = surgeon.inpaint(  # pyre-ignore[16]
                 image=original_image,
@@ -500,6 +668,15 @@ async def refine_feature(
                 except RuntimeError as ve:
                     print(f"[Refine] Face shape validation failed: {ve}")
                     raise HTTPException(status_code=502, detail=str(ve))
+
+            # Validate hair output before accepting
+            if is_hair_refinement:
+                try:
+                    validate_hair_result(original_image, result_image, processed_mask)
+                    print(f"[Refine] Hair validation passed successfully.")
+                except RuntimeError as he:
+                    print(f"[Refine] Hair validation failed: {he}")
+                    raise HTTPException(status_code=502, detail=str(he))
         except RuntimeError as re:
             print(f"[Refine] AI Service error: {re}")
             raise HTTPException(status_code=502, detail=str(re))

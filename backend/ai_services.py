@@ -166,102 +166,129 @@ class FaceIdentifier:
 
     def _generate_hair_mask(self, image: Image.Image, prompt: str = "") -> Image.Image:
         """
-        Dynamically generate a hairstyle-specific anatomical mask.
-        Covers cranial dome, hairline, temples, and adaptive zones for long/curly/bald/straight/short styles.
-        Strictly excludes and protects internal facial identity (forehead, eyebrows, eyes, ears, cheeks, nose, mouth).
+        Dynamically generate a hairstyle-specific surgical mask.
+        Covers the complete hair region:
+        1. Cranial dome (top of head).
+        2. Front hairline and temples.
+        3. Lateral sides of the head (above, around and behind ears).
+        4. Complete existing hair region present in the input image (via adaptive dark-stroke segmentation).
+        5. Extended shoulder/chest columns for long hairstyles; expanded dome for curly/afro styles.
+        STRICTLY preserves and protects internal facial identity (eyebrows, eyes, nose, lips/mouth, philtrum, chin).
         """
         import numpy as np
         w, h = image.size
-        mask = Image.new("L", (w, h), 0)
-        draw = ImageDraw.Draw(mask)
         lower_prompt = prompt.lower().strip()
 
+        is_bald = any(k in lower_prompt for k in [
+            "bald", "shaved head", "clean-shaven head", "clean shaven head",
+            "no hair", "bare head", "shaved scalp", "hairless", "bald head"
+        ])
+        is_buzz = any(k in lower_prompt for k in ["buzz", "buzzcut", "buzz cut", "crew cut"]) and not is_bald
+        is_short = (any(k in lower_prompt for k in ["short", "crop", "cropped", "neat hair", "trimmed", "short hair"]) or is_buzz) and not is_bald
         is_long = any(k in lower_prompt for k in ["long", "shoulder", "past shoulders", "chest", "lengthy", "extensions", "ponytail", "flowing", "braid", "dread"])
-        is_curly = any(k in lower_prompt for k in ["curly", "curls", "afro", "wavy", "frizzy", "kinky", "volume", "voluminous", "permed", "ringlets", "coily"])
-        is_bald = any(k in lower_prompt for k in ["bald", "shaved", "buzz", "buzzcut", "clean shaven head", "no hair", "bare head", "bald head", "shaved head", "fade"])
-        is_short = any(k in lower_prompt for k in ["short", "crop", "crew cut", "pixie", "trimmed"])
-        is_straight = any(k in lower_prompt for k in ["straight", "sleek", "flat", "smooth"])
-        is_light = any(k in lower_prompt for k in ["light", "blonde", "blond", "grey", "gray", "white", "silver", "highlights"])
+        is_curly = any(k in lower_prompt for k in ["curly", "curls", "afro", "kinky", "volume", "voluminous", "permed", "ringlets", "coily"])
+        is_wavy = any(k in lower_prompt for k in ["wavy", "waves"])
 
-        # Hairline polygon: natural curved anatomical hairline
-        hairline_points = [
+        # 1. Base anatomical canvas
+        base_mask = Image.new("L", (w, h), 0)
+        draw = ImageDraw.Draw(base_mask)
+
+        # Top cranial dome (covers skull crown)
+        draw.ellipse([int(w * 0.04), -int(h * 0.16), int(w * 0.96), int(h * 0.28)], fill=255)
+
+        # Natural curved hairline polygon
+        hairline_poly = [
             (0, 0),
             (w, 0),
-            (w, int(h * 0.33)),
-            (int(w * 0.82), int(h * 0.28)),
-            (int(w * 0.74), int(h * 0.21)),
-            (int(w * 0.60), int(h * 0.17)),
-            (int(w * 0.50), int(h * 0.16)),
-            (int(w * 0.40), int(h * 0.17)),
-            (int(w * 0.26), int(h * 0.21)),
-            (int(w * 0.18), int(h * 0.28)),
-            (0, int(h * 0.33))
+            (w, int(h * 0.34)),
+            (int(w * 0.85), int(h * 0.28)),
+            (int(w * 0.72), int(h * 0.22)),
+            (int(w * 0.60), int(h * 0.18)),
+            (int(w * 0.50), int(h * 0.17)),
+            (int(w * 0.40), int(h * 0.18)),
+            (int(w * 0.28), int(h * 0.22)),
+            (int(w * 0.15), int(h * 0.28)),
+            (0, int(h * 0.34))
         ]
+        draw.polygon(hairline_poly, fill=255)
 
-        if is_bald:
-            # Bald: crown down to hairline
-            draw.polygon(hairline_points, fill=255)
+        # Lateral side hair columns (temples and sides down to ears/sideburns)
+        side_bottom_y = 0.52 if not is_long else 0.98
+        side_inner_x = 0.25 if not is_long else 0.32
+        draw.rectangle([0, int(h * 0.14), int(w * side_inner_x), int(h * side_bottom_y)], fill=255)
+        draw.rectangle([int(w * (1 - side_inner_x)), int(h * 0.14), w, int(h * side_bottom_y)], fill=255)
+
+        if is_curly:
+            # Voluminous curly/afro hair extends wider and higher
+            draw.ellipse([int(w * 0.01), -int(h * 0.20), int(w * 0.99), int(h * 0.36)], fill=255)
+            draw.rectangle([0, int(h * 0.12), int(w * 0.28), int(h * 0.58)], fill=255)
+            draw.rectangle([int(w * 0.72), int(h * 0.12), w, int(h * 0.58)], fill=255)
         elif is_long:
-            # Long hair covers the crown and extends down the lateral margins past shoulders
-            draw.polygon(hairline_points, fill=255)
-            draw.rectangle([0, int(h * 0.15), int(w * 0.22), int(h * 0.98)], fill=255)
-            draw.rectangle([int(w * 0.78), int(h * 0.15), w, int(h * 0.98)], fill=255)
-        elif is_curly:
-            # Voluminous curly hair
-            draw.polygon(hairline_points, fill=255)
-            draw.ellipse([int(w * 0.02), -int(h * 0.16), int(w * 0.98), int(h * 0.30)], fill=255)
-            draw.rectangle([0, int(h * 0.10), int(w * 0.24), int(h * 0.46)], fill=255)
-            draw.rectangle([int(w * 0.76), int(h * 0.10), w, int(h * 0.46)], fill=255)
-        elif is_short:
-            # Neat short crop
-            draw.polygon(hairline_points, fill=255)
-            draw.rectangle([0, int(h * 0.15), int(w * 0.22), int(h * 0.40)], fill=255)
-            draw.rectangle([int(w * 0.78), int(h * 0.15), w, int(h * 0.40)], fill=255)
-        elif is_straight:
-            # Neat straight hair
-            draw.polygon(hairline_points, fill=255)
-            draw.rectangle([0, int(h * 0.15), int(w * 0.22), int(h * 0.44)], fill=255)
-            draw.rectangle([int(w * 0.78), int(h * 0.15), w, int(h * 0.44)], fill=255)
-        elif is_light:
-            draw.polygon(hairline_points, fill=255)
-            draw.rectangle([0, int(h * 0.15), int(w * 0.24), int(h * 0.48)], fill=255)
-            draw.rectangle([int(w * 0.76), int(h * 0.15), w, int(h * 0.48)], fill=255)
-        else:
-            # Standard hairstyle
-            draw.polygon(hairline_points, fill=255)
-            draw.rectangle([0, int(h * 0.15), int(w * 0.22), int(h * 0.44)], fill=255)
-            draw.rectangle([int(w * 0.78), int(h * 0.15), w, int(h * 0.44)], fill=255)
+            # Long hair extends down the shoulders on both sides
+            draw.rectangle([0, int(h * 0.15), int(w * 0.33), int(h * 0.98)], fill=255)
+            draw.rectangle([int(w * 0.67), int(h * 0.15), w, int(h * 0.98)], fill=255)
 
-        mask_arr = np.array(mask)
-
-        # Detect stray hair pixels / curl flares on outer cranial perimeter
+        # 2. ADAPTIVE SEGMENTATION OF EXISTING HAIR:
+        # In a forensic composite, hair consists of darker pencil strokes (< 195).
+        # Any existing hair strokes in cranial dome and lateral margins MUST be covered so
+        # previous hairstyles (e.g. big curls or long locks) are cleanly replaced rather than left behind!
         gray = np.array(image.convert("L"), dtype=float)
-        outer_left = (gray < 210) & (np.arange(w) < int(w * 0.25))[None, :] & (np.arange(h) < int(h * 0.36))[:, None]
-        outer_right = (gray < 210) & (np.arange(w) > int(w * 0.75))[None, :] & (np.arange(h) < int(h * 0.36))[:, None]
-        top_strays = (gray < 210) & (np.arange(h) < int(h * 0.20))[:, None]
-        mask_arr[outer_left] = 255
-        mask_arr[outer_right] = 255
-        mask_arr[top_strays] = 255
+        hair_zones = np.zeros((h, w), dtype=bool)
+        # All upper cranial area above y = 0.32h
+        hair_zones[:int(h * 0.32), :] = True
+        # Lateral margins (temples, sides, ears, down to y = 0.70h)
+        hair_zones[int(h * 0.14):int(h * 0.70), :int(w * 0.28)] = True
+        hair_zones[int(h * 0.14):int(h * 0.70), int(w * 0.72):] = True
+        if is_long:
+            # Long hair zones extend all the way down shoulders
+            hair_zones[int(h * 0.40):, :int(w * 0.33)] = True
+            hair_zones[int(h * 0.40):, int(w * 0.67):] = True
 
-        # STRICT ANATOMICAL EXCLUSIONS - ZERO BLEED FACIAL PROTECTION:
-        # 1. Forehead skin (y: 0.17h - 0.30h, x: 0.25w - 0.75w)
-        mask_arr[int(h * 0.17):int(h * 0.30), int(w * 0.25):int(w * 0.75)] = 0
-        # 2. Eyebrows and Eyes (y: 0.26h - 0.48h, x: 0.18w - 0.82w)
-        mask_arr[int(h * 0.26):int(h * 0.48), int(w * 0.18):int(w * 0.82)] = 0
-        # 3. Ears (100% protected unless long hair)
-        if not is_long:
-            mask_arr[int(h * 0.32):int(h * 0.58), :int(w * 0.25)] = 0
-            mask_arr[int(h * 0.32):int(h * 0.58), int(w * 0.75):] = 0
-        # 4. Cheeks, Nose, Mouth, Lips, Chin (central column)
-        mask_arr[int(h * 0.45):int(h * 0.65), int(w * 0.22):int(w * 0.78)] = 0
-        mask_arr[int(h * 0.62):int(h * 0.90), int(w * 0.24):int(w * 0.76)] = 0
-        mask_arr[int(h * 0.78):, int(w * 0.30):int(w * 0.70)] = 0
-        # 5. Full lower region protection for non-long styles
-        if not is_long:
-            mask_arr[int(h * 0.45):, :] = 0
+        dark_strokes = (gray < 195) & hair_zones
+        stroke_img = Image.fromarray((dark_strokes * 255).astype(np.uint8))
+        # Morphological dilation connects pencil strokes into a solid hair mask
+        dilated_strokes = stroke_img.filter(ImageFilter.MaxFilter(9))
 
-        print(f"Enforced surgical boundary on dynamic HAIR mask for '{prompt}' (forehead, eyebrows, eyes, nose, cheeks, mouth protected)")
-        return Image.fromarray(mask_arr)
+        combined_arr = np.maximum(np.array(base_mask), np.array(dilated_strokes))
+
+        # 3. STRICT FACIAL IDENTITY PRESERVATION (ZERO BLEED):
+        # Eyebrows (100% protected)
+        combined_arr[int(h * 0.29):int(h * 0.38), int(w * 0.22):int(w * 0.78)] = 0
+        # Eyes and upper cheek (100% protected)
+        combined_arr[int(h * 0.37):int(h * 0.48), int(w * 0.18):int(w * 0.82)] = 0
+        # Nose and bridge (100% protected)
+        combined_arr[int(h * 0.44):int(h * 0.64), int(w * 0.28):int(w * 0.72)] = 0
+        # Lips and mouth (100% protected)
+        combined_arr[int(h * 0.63):int(h * 0.78), int(w * 0.24):int(w * 0.76)] = 0
+        # Philtrum (100% protected)
+        combined_arr[int(h * 0.58):int(h * 0.65), int(w * 0.30):int(w * 0.70)] = 0
+        # Chin center and neck column (100% protected)
+        combined_arr[int(h * 0.78):, int(w * 0.30):int(w * 0.70)] = 0
+
+        # Forehead skin protection
+        if not is_bald:
+            # For haired styles: protect central forehead
+            combined_arr[int(h * 0.20):int(h * 0.29), int(w * 0.28):int(w * 0.72)] = 0
+        else:
+            # For bald: protect middle forehead (above eyebrows) while allowing smooth scalp dome
+            combined_arr[int(h * 0.24):int(h * 0.29), int(w * 0.28):int(w * 0.72)] = 0
+
+        # Apply soft feathering for natural hairline transition
+        feathered = Image.fromarray(combined_arr).filter(ImageFilter.GaussianBlur(3))
+        f_arr = np.array(feathered)
+
+        # Re-enforce zero-bleed core so no blurred pixels penetrate protected features
+        f_arr[int(h * 0.29):int(h * 0.38), int(w * 0.22):int(w * 0.78)] = 0
+        f_arr[int(h * 0.37):int(h * 0.48), int(w * 0.18):int(w * 0.82)] = 0
+        f_arr[int(h * 0.44):int(h * 0.64), int(w * 0.28):int(w * 0.72)] = 0
+        f_arr[int(h * 0.63):int(h * 0.78), int(w * 0.24):int(w * 0.76)] = 0
+        f_arr[int(h * 0.58):int(h * 0.65), int(w * 0.30):int(w * 0.70)] = 0
+        f_arr[int(h * 0.78):, int(w * 0.30):int(w * 0.70)] = 0
+        f_arr[f_arr < 4] = 0
+
+        coverage = np.mean(f_arr > 0) * 100
+        print(f"Enforced surgical boundary on dynamic HAIR mask for '{prompt}' (coverage: {coverage:.1f}%, facial identity 100% protected)")
+        return Image.fromarray(f_arr)
 
     def _generate_face_shape_mask(self, image: Image.Image, prompt: str = "") -> Image.Image:
         """
@@ -512,11 +539,12 @@ class FaceIdentifier:
                 m_arr[int(h * 0.60):int(h * 0.76), int(w * 0.32):int(w * 0.68)] = 0
             elif is_hair:
                 # Surgical protection: Eyebrows, eyes, nose, mouth 100% protected from hair edits
-                m_arr[int(h * 0.28):int(h * 0.37), int(w * 0.24):int(w * 0.76)] = 0  # Eyebrows
-                m_arr[int(h * 0.37):int(h * 0.47), int(w * 0.20):int(w * 0.80)] = 0  # Eyes
-                m_arr[int(h * 0.47):int(h * 0.63), int(w * 0.27):int(w * 0.73)] = 0  # Nose
-                m_arr[int(h * 0.64):int(h * 0.88), int(w * 0.30):int(w * 0.70)] = 0  # Mouth
-                m_arr[int(h * 0.80):, int(w * 0.38):int(w * 0.62)] = 0               # Neck center
+                m_arr[int(h * 0.29):int(h * 0.38), int(w * 0.22):int(w * 0.78)] = 0  # Eyebrows
+                m_arr[int(h * 0.37):int(h * 0.48), int(w * 0.18):int(w * 0.82)] = 0  # Eyes
+                m_arr[int(h * 0.44):int(h * 0.64), int(w * 0.28):int(w * 0.72)] = 0  # Nose
+                m_arr[int(h * 0.63):int(h * 0.78), int(w * 0.24):int(w * 0.76)] = 0  # Mouth
+                m_arr[int(h * 0.58):int(h * 0.65), int(w * 0.30):int(w * 0.70)] = 0  # Philtrum
+                m_arr[int(h * 0.78):, int(w * 0.30):int(w * 0.70)] = 0               # Central chin / neck
             elif is_shape:
                 # Surgical protection: match the exact same zones as _generate_face_shape_mask
                 # Full upper face — eyes, eyebrows, forehead, hairline (100% protected)
@@ -639,7 +667,8 @@ class CloudflareAIClient:
 
     def inpaint(self, image: Image.Image, mask: Image.Image, prompt: str,
                 negative_prompt: str = "",
-                strength: float = 0.85, num_steps: int = 20, guidance: float = 7.5) -> Image.Image:
+                strength: float = 0.85, num_steps: int = 20, guidance: float = 7.5,
+                seed: int = 0) -> Image.Image:
         """
         Inpaint masked area via @cf/runwayml/stable-diffusion-v1-5-inpainting.
         Sends base image as base64 and binary mask as byte array.
@@ -671,6 +700,8 @@ class CloudflareAIClient:
         }
         if negative_prompt:
             payload["negative_prompt"] = negative_prompt
+        if seed and seed > 0:
+            payload["seed"] = int(seed)
 
         print(f"[Cloudflare AI] Calling inpainting ({self.INPAINT_MODEL}, strength={strength}, steps={num_steps})...")
         try:
@@ -826,7 +857,8 @@ class DigitalSurgeon:
             negative_prompt=negative_prompt,
             strength=strength,
             num_steps=num_inference_steps,
-            guidance=guidance_scale
+            guidance=guidance_scale,
+            seed=seed
         )
 
         if inpainted_image is None:
@@ -847,6 +879,14 @@ class DigitalSurgeon:
 
         # Threshold out tiny sub-pixel Gaussian blur tails (< 4) so unmasked pixels remain 0 with zero bleed
         mask_np[mask_np < 4] = 0
+
+        # Surgical safeguard: Re-enforce zero-bleed core for internal facial identity
+        h_c, w_c = mask_np.shape
+        mask_np[int(h_c * 0.29):int(h_c * 0.38), int(w_c * 0.22):int(w_c * 0.78)] = 0  # Eyebrows
+        mask_np[int(h_c * 0.37):int(h_c * 0.48), int(w_c * 0.18):int(w_c * 0.82)] = 0  # Eyes
+        mask_np[int(h_c * 0.44):int(h_c * 0.64), int(w_c * 0.28):int(w_c * 0.72)] = 0  # Nose
+        mask_np[int(h_c * 0.63):int(h_c * 0.78), int(w_c * 0.24):int(w_c * 0.76)] = 0  # Mouth
+
         composite_mask = Image.fromarray(mask_np)
 
         final_result = Image.composite(inpainted_image, image, composite_mask)
